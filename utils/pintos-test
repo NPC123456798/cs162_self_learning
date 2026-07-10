@@ -105,7 +105,7 @@ then # Debug the given test
 		# *while* you are debugging. Students should open a second terminal
 		# tab and run 'pintos-gdb kernel.o' there, just like they always had
 		# to before this script existed.
-
+		# record change
 		# For some strange reason, when the tests are running under the
 		# debugger, they refuse to die from a SIGINT. To get around this, we
 		# catch the SIGINT ourselves, and terminate the test with a SIGTERM
