@@ -477,6 +477,10 @@ static bool setup_stack(void** esp) {
     else
       palloc_free_page(kpage);
   }
+
+  // TODO: add the argv and the argc and the NULL return address and some NULL sentinel
+  // TODO: this function now only put correct value to  the esp  but others are less.
+
   return success;
 }
 
