@@ -120,8 +120,8 @@ static void start_process(void* file_name_) {
   }
 
 
-  // TODO: construct user stack here!                     */
-
+  // TODO: construct user stack here!        
+  strtok_r()
 
 
   /* Start the user process by simulating a return from an
