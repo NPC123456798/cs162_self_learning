@@ -121,7 +121,23 @@ static void start_process(void* file_name_) {
 
 
   // TODO: construct user stack here!        
-  strtok_r()
+  char *save_ptr;
+  char *token;
+  char *argv_ptrs[MAX_ARGS];  
+  int argc = 0;
+
+  // 3. use strtok_r to divide string
+  token = strtok_r(file_name, " ", &save_ptr);
+  while (token != NULL && argc < MAX_ARGS - 1) {
+      argv_ptrs[argc++] = token;
+      token = strtok_r(NULL, " ", &save_ptr);
+  }
+  argv_ptrs[argc] = NULL; // sentinel
+
+
+
+
+
 
 
   /* Start the user process by simulating a return from an
