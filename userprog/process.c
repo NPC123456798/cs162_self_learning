@@ -113,8 +113,8 @@ static void start_process(void* file_name_) {
   }
 
   /* Clean up. Exit on failure or jump to userspace */
-  palloc_free_page(file_name);
   if (!success) {
+    palloc_free_page(file_name);
     sema_up(&temporary);
     thread_exit();
   }
@@ -148,6 +148,13 @@ static void start_process(void* file_name_) {
   uint8_t *user_stack = (uint8_t *) PHYS_BASE;
   user_stack -= total_size;
   user_stack = (uint8_t *)((uint32_t)user_stack & ~0xF); // because bit operation should be used in int instead of pointer so use type change
+
+
+
+
+
+
+  palloc_free_page(file_name);
 
 
   /* Start the user process by simulating a return from an
