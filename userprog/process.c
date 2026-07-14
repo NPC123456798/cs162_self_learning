@@ -149,10 +149,37 @@ static void start_process(void* file_name_) {
   user_stack -= total_size;
   user_stack = (uint8_t *)((uint32_t)user_stack & ~0xF); // because bit operation should be used in int instead of pointer so use type change
 
+  uint8_t *cur = user_stack;  
+  // faked return address
+  *(void **)cur = NULL;
+  cur += sizeof(void*);
+  // argc
+  *(int *)cur = argc;
+  cur += sizeof(int);
+  // argv[0] is in the low address for argv pointers so here its just + sizeof(char **)
+  char **argv_start = (char **)(cur + sizeof(char **));
+  *(char ***)cur = argv_start;
+  cur += sizeof(char **);
 
+  // just for occupation
+  char **argv_array = (char **)cur;
+  cur += (argc + 1) * sizeof(char *); // extra 1 for sentinel NULL pointer
 
+  // put the strings into the stack
+  char *string_addrs[argc];
+  for (int i = 0; i < argc; i++) {
+      size_t len = strlen(argv_ptrs[i]) + 1;
+      memcpy(cur, argv_ptrs[i], len);
+      string_addrs[i] = (char *)cur;
+      cur += len;
+  }
+  // put right pointer into stack
+  for (int i = 0; i < argc; i++) {
+    argv_array[i] = string_addrs[i];
+  }
+  argv_array[argc] = NULL; // sentinel
 
-
+  if_.esp = user_stack;
 
   palloc_free_page(file_name);
 
