@@ -134,10 +134,20 @@ static void start_process(void* file_name_) {
   }
   argv_ptrs[argc] = NULL; // sentinel
 
+  size_t total_size = 0;
+  // you should count  the length of string because they all should be put on the stack
+  for (int i = 0; i < argc; i++) {
+      total_size += strlen(argv_ptrs[i]) + 1;
+  }
+  total_size += (argc + 1) * sizeof(char *); // include the sentinel so +1 for argc
+  total_size += sizeof(char **); // the address of argv array
+  total_size += sizeof(int); // argc
+  total_size += sizeof(void *); // faked return address
 
-
-
-
+  // uint8_t * equal unsigned char *,it let the + or - only move 1 byte for 1
+  uint8_t *user_stack = (uint8_t *) PHYS_BASE;
+  user_stack -= total_size;
+  user_stack = (uint8_t *)((uint32_t)user_stack & ~0xF); // because bit operation should be used in int instead of pointer so use type change
 
 
   /* Start the user process by simulating a return from an
