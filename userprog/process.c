@@ -148,7 +148,7 @@ static void start_process(void* file_name_) {
   uint8_t *user_stack = (uint8_t *) PHYS_BASE;
   user_stack -= total_size;
   user_stack = (uint8_t *)((uint32_t)user_stack & ~0xF); // because bit operation should be used in int instead of pointer so use type change
-
+  user_stack -= 4;
   uint8_t *cur = user_stack;  
   // faked return address
   *(void **)cur = NULL;
@@ -178,7 +178,7 @@ static void start_process(void* file_name_) {
     argv_array[i] = string_addrs[i];
   }
   argv_array[argc] = NULL; // sentinel
-
+  
   if_.esp = user_stack;
 
   palloc_free_page(file_name);
