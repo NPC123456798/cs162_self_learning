@@ -93,13 +93,23 @@ static void start_process(void* file_name_) {
     strlcpy(t->pcb->process_name, t->name, sizeof t->name);
   }
 
+  // here start analysis the commandline just the file_name
+  char *save_ptr;
+  char *token;
+  char *argv_ptrs[MAX_ARGS];  
+  int argc = 0;
+
+  // 3. use strtok_r to divide string
+  token = strtok_r(file_name, " ", &save_ptr);
+
+
   /* Initialize interrupt frame and load executable. */
   if (success) {
     memset(&if_, 0, sizeof if_);
     if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
     if_.cs = SEL_UCSEG;
     if_.eflags = FLAG_IF | FLAG_MBS;
-    success = load(file_name, &if_.eip, &if_.esp);
+    success = load(token, &if_.eip, &if_.esp);
   }
 
   /* Handle failure with succesful PCB malloc. Must free the PCB */
@@ -120,14 +130,8 @@ static void start_process(void* file_name_) {
   }
 
 
-  // TODO: construct user stack here!        
-  char *save_ptr;
-  char *token;
-  char *argv_ptrs[MAX_ARGS];  
-  int argc = 0;
-
-  // 3. use strtok_r to divide string
-  token = strtok_r(file_name, " ", &save_ptr);
+  // take all token from file_name or call it command_line    
+  
   while (token != NULL && argc < MAX_ARGS - 1) {
       argv_ptrs[argc++] = token;
       token = strtok_r(NULL, " ", &save_ptr);
