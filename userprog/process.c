@@ -114,9 +114,15 @@ pid_t process_execute(const char* file_name) {
         child->waited = false;
         child->exited = false;
         sema_init(&child->wait_sema, 0);
+
+        lock_acquire(&child_lock);
+
         list_push_back(&thread_current()->pcb->children, &child->elem);
         *info->child_info = child;
         (*info->child_info)->child_thread = info->child_thread;
+  
+        lock_release(&child_lock);
+
     }
   }
 
@@ -296,7 +302,7 @@ void process_exit(int status) {
 
 
 
-
+  lock_acquire(&child_lock);
 
   struct process *pcb = cur->pcb;
   if ( pcb->my_info_as_child != NULL) {
@@ -319,6 +325,7 @@ void process_exit(int status) {
     }
 
 
+  lock_release(&child_lock);
 
 
 
