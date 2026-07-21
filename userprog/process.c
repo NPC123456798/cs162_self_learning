@@ -25,7 +25,7 @@ struct process_load_info {
   struct semaphore load_sema; 
   bool success;               // flag of load success
   tid_t child_tid;            // child thread's tid
-  struct child *child_info; // child thread's info
+  struct child **child_info; // child thread's info
 };
 
 
@@ -81,7 +81,7 @@ pid_t process_execute(const char* file_name) {
   sema_init(&info->load_sema,0);
   info->success = false;
   info->child_tid = TID_ERROR;
-
+  info->child_info = NULL;
 
 
   /* Create a new thread to execute FILE_NAME. */
@@ -100,7 +100,8 @@ pid_t process_execute(const char* file_name) {
 
   pid_t result = info->success ? info->child_tid : TID_ERROR;
 
-  if (result != TID_ERROR && thread_current()->pcb != NULL) {
+  if (result != TID_ERROR && thread_current()->pcb != NULL 
+      && thread_current()->pcb->main_thread != NULL) {
     // success: create child process record which is hang on the parent process list
     struct child *child = malloc(sizeof(struct child));
     if (child) {
@@ -110,7 +111,7 @@ pid_t process_execute(const char* file_name) {
         child->exited = false;
         sema_init(&child->wait_sema, 0);
         list_push_back(&thread_current()->pcb->children, &child->elem);
-        thread_current()->pcb->my_info_as_child = child;
+        *info->child_info = child;
     }
   }
 
@@ -186,8 +187,9 @@ static void start_process(void* info_) {
   }
 
 
-  info->child_tid = thread_current()->tid;
+  info->child_tid = t->tid;
   info->success = true;
+  info->child_info = &t->pcb->my_info_as_child;
   sema_up(&info->load_sema);
 
   // take all token from file_name or call it command_line    
