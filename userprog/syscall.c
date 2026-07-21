@@ -14,12 +14,12 @@ void syscall_init(void) { intr_register_int(0x30, 3, INTR_ON, syscall_handler, "
 
 static void syscall_handler(struct intr_frame* f UNUSED) {
   if (f->esp == NULL || !is_user_vaddr((void*)f->esp)) {
-    process_exit();
+    process_exit(-1);
     return;
   }
   uint32_t* args = ((uint32_t*)f->esp);
   if (!verify_user_range(args,sizeof(int))) {
-    process_exit();
+    process_exit(-1);
     return;
   }
   uint32_t syscall_no = args[0];
@@ -35,19 +35,19 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
     case SYS_EXIT:
 
         if (!verify_user_range((void*)(f->esp + 4), sizeof(int))) {
-            process_exit();
+            process_exit(-1);
             return;
         }
         int status = *(int*)(f->esp + 4);
         f->eax = status;
         printf("%s: exit(%d)\n", thread_current()->pcb->process_name, status);
-        process_exit();
+        process_exit(status);
         break;
         
     case SYS_PRACTICE:
 
         if (!verify_user_range((void*)(f->esp + 4), sizeof(int))) {
-            process_exit();
+            process_exit(-1);
             return;
         }
         int i = *(int*)(f->esp + 4);
@@ -56,13 +56,13 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
         
     case SYS_EXEC:
         if (!verify_user_range((void*)(f->esp + 4), sizeof(char*))) {
-            process_exit();
+            process_exit(-1);
             return;
         }
         char* cmd_line = *(char**)(f->esp + 4);
 
         if (!verify_user_string(cmd_line)) {
-            process_exit();
+            process_exit(-1);
             return;
         }
         f->eax = process_execute(cmd_line);
@@ -71,7 +71,7 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
     case SYS_WAIT:
 
         if (!verify_user_range((void*)(f->esp + 4), sizeof(int))) {
-            process_exit();
+            process_exit(-1);
             return;
         }
         pid_t pid = *(pid_t*)(f->esp + 4);
@@ -80,7 +80,7 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
         
     default:
 
-        process_exit();
+        process_exit(-1);
         break;
   }
 

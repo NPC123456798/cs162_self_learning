@@ -26,10 +26,12 @@ struct process_load_info {
   bool success;               // flag of load success
   tid_t child_tid;            // child thread's tid
   struct child **child_info; // child thread's info
+  struct thread *child_thread; // child process' thread 
 };
 
 
 static struct semaphore temporary;
+static struct lock child_lock;
 static thread_func start_process NO_RETURN;
 static thread_func start_pthread NO_RETURN;
 static bool load(const char* file_name, void (**eip)(void), void** esp);
@@ -55,7 +57,7 @@ void userprog_init(void) {
 
   list_init(&t->pcb->children);
   t->pcb->my_info_as_child = NULL;
-
+  lock_init(&child_lock);
 }
 
 /* Starts a new thread running a user program loaded from
@@ -85,7 +87,7 @@ pid_t process_execute(const char* file_name) {
   info->success = false;
   info->child_tid = TID_ERROR;
   info->child_info = NULL;
-
+  info->child_thread = NULL;
 
   /* Create a new thread to execute FILE_NAME. */
 
@@ -114,6 +116,7 @@ pid_t process_execute(const char* file_name) {
         sema_init(&child->wait_sema, 0);
         list_push_back(&thread_current()->pcb->children, &child->elem);
         *info->child_info = child;
+        (*info->child_info)->child_thread = info->child_thread;
     }
   }
 
@@ -192,6 +195,7 @@ static void start_process(void* info_) {
   info->child_tid = t->tid;
   info->success = true;
   info->child_info = &t->pcb->my_info_as_child;
+  info->child_thread = t;
   sema_up(&info->load_sema);
 
   // take all token from file_name or call it command_line    
@@ -277,7 +281,7 @@ int process_wait(pid_t child_pid ) {
 }
 
 /* Free the current process's resources. */
-void process_exit(void) {
+void process_exit(int status) {
   struct thread* cur = thread_current();
   uint32_t* pd;
 
@@ -286,6 +290,39 @@ void process_exit(void) {
     thread_exit();
     NOT_REACHED();
   }
+
+
+
+
+
+
+
+
+  struct process *pcb = cur->pcb;
+  if ( pcb->my_info_as_child != NULL) {
+        struct child *child = pcb->my_info_as_child;
+        child->exit_status = status;   // save exit status
+        child->exited = true;          // mark exited
+        sema_up(&child->wait_sema);    // wake up parent process
+  }
+
+
+  while (!list_empty(&pcb->children)) {
+      struct child *c = list_entry(list_pop_front(&pcb->children), struct child, elem);
+      if (!c->exited) {
+          // set my_info_as_child to NULL
+          if (c->child_thread && c->child_thread->pcb) {
+              c->child_thread->pcb->my_info_as_child = NULL;
+          }
+      }
+      free(c);
+    }
+
+
+
+
+
+
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -302,6 +339,7 @@ void process_exit(void) {
     pagedir_activate(NULL);
     pagedir_destroy(pd);
   }
+
 
   /* Free the PCB of this process and kill this thread
      Avoid race where PCB is freed before t->pcb is set to NULL

@@ -42,13 +42,14 @@ struct child {
    bool exited;
    struct semaphore wait_sema; // shared by parent and child process
    struct list_elem elem;     
+   struct thread *child_thread; // point to child process itself
 };
 
 void userprog_init(void);
 
 pid_t process_execute(const char* file_name);
 int process_wait(pid_t);
-void process_exit(void);
+void process_exit(int status);
 void process_activate(void);
 
 bool is_main_thread(struct thread*, struct process*);
