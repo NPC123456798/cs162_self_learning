@@ -20,6 +20,14 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
+struct process_load_info {
+  char *file_name;            // executable file name
+  struct semaphore load_sema; 
+  bool success;               // flag of load success
+  tid_t child_tid;            // child thread's tid
+};
+
+
 static struct semaphore temporary;
 static thread_func start_process NO_RETURN;
 static thread_func start_pthread NO_RETURN;
@@ -51,28 +59,54 @@ void userprog_init(void) {
    before process_execute() returns.  Returns the new process's
    process id, or TID_ERROR if the thread cannot be created. */
 pid_t process_execute(const char* file_name) {
-  char* fn_copy;
+  struct process_load_info* info = malloc(sizeof(struct process_load_info));
+  if (!info)
+  {
+    return TID_ERROR;
+  }
+  
   tid_t tid;
-
+  
   sema_init(&temporary, 0);
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
-  fn_copy = palloc_get_page(0);
-  if (fn_copy == NULL)
+  info->file_name = palloc_get_page(0);
+  if (info->file_name == NULL) {
+    free(info);
     return TID_ERROR;
-  strlcpy(fn_copy, file_name, PGSIZE);
+  }
+  strlcpy(info->file_name, file_name, PGSIZE);
+
+  sema_init(&info->load_sema,0);
+  info->success = false;
+  info->child_tid = TID_ERROR;
+
+
 
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create(file_name, PRI_DEFAULT, start_process, fn_copy);
+
+  
+  tid = thread_create(file_name, PRI_DEFAULT, start_process,(void*) info);
   if (tid == TID_ERROR)
-    palloc_free_page(fn_copy);
-  return tid;
+  {
+    palloc_free_page(info->file_name);
+    free(info);
+    return tid;
+  }
+
+  sema_down(&info->load_sema);
+
+
+  pid_t result = info->success ? info->child_tid : TID_ERROR;
+  free(info);   
+  return result;
 }
 
 /* A thread function that loads a user process and starts it
    running. */
-static void start_process(void* file_name_) {
-  char* file_name = (char*)file_name_;
+static void start_process(void* info_) {
+  struct process_load_info *info = (struct process_load_info *)info_;
+  char* file_name = (char*)info->file_name;
   struct thread* t = thread_current();
   struct intr_frame if_;
   bool success, pcb_success;
@@ -124,11 +158,18 @@ static void start_process(void* file_name_) {
 
   /* Clean up. Exit on failure or jump to userspace */
   if (!success) {
+    info->child_tid = TID_ERROR;
+    info->success = false;
+    sema_up(&info->load_sema);
     palloc_free_page(file_name);
     sema_up(&temporary);
     thread_exit();
   }
 
+
+  info->child_tid = thread_current()->tid;
+  info->success = true;
+  sema_up(&info->load_sema);
 
   // take all token from file_name or call it command_line    
   

@@ -6,6 +6,7 @@
 #include "threads/vaddr.h"
 #include "userprog/process.h"
 #include "userprog/pagedir.h"
+#include "devices/shutdown.h"
 
 static void syscall_handler(struct intr_frame*);
 
@@ -29,7 +30,7 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
   switch (syscall_no)
   {
     case SYS_HALT:
-        halt();
+        shutdown_power_off();
         break;
     case SYS_EXIT:
 
