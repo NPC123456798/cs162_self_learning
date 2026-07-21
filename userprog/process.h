@@ -28,11 +28,21 @@ typedef void (*stub_fun)(pthread_fun, void*);
    of the process, which is `special`. */
 struct process {
   /* Owned by process.c. */
-  uint32_t* pagedir;          /* Page directory. */
-  char process_name[16];      /* Name of the main thread */
-  struct thread* main_thread; /* Pointer to main thread */
+   uint32_t* pagedir;          /* Page directory. */
+   char process_name[16];      /* Name of the main thread */
+   struct thread* main_thread; /* Pointer to main thread */
+   struct list children;
+   struct child *my_info_as_child; // it points to parent process' child process which is this current process in parent process' children list
 };
 
+struct child {
+   pid_t pid;
+   int exit_status;
+   bool waited;
+   bool exited;
+   struct semaphore wait_sema; // shared by parent and child process
+   struct list_elem elem;     
+};
 
 void userprog_init(void);
 

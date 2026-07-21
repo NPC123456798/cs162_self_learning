@@ -25,6 +25,7 @@ struct process_load_info {
   struct semaphore load_sema; 
   bool success;               // flag of load success
   tid_t child_tid;            // child thread's tid
+  struct child *child_info; // child thread's info
 };
 
 
@@ -98,6 +99,21 @@ pid_t process_execute(const char* file_name) {
 
 
   pid_t result = info->success ? info->child_tid : TID_ERROR;
+
+  if (result != TID_ERROR && thread_current()->pcb != NULL) {
+    // success: create child process record which is hang on the parent process list
+    struct child *child = malloc(sizeof(struct child));
+    if (child) {
+        child->pid = result;
+        child->exit_status = -1;
+        child->waited = false;
+        child->exited = false;
+        sema_init(&child->wait_sema, 0);
+        list_push_back(&thread_current()->pcb->children, &child->elem);
+        thread_current()->pcb->my_info_as_child = child;
+    }
+  }
+
   free(info);   
   return result;
 }
@@ -121,10 +137,13 @@ static void start_process(void* info_) {
     // does not try to activate our uninitialized pagedir
     new_pcb->pagedir = NULL;
     t->pcb = new_pcb;
-
     // Continue initializing the PCB as normal
     t->pcb->main_thread = t;
     strlcpy(t->pcb->process_name, t->name, sizeof t->name);
+
+    // add init for child process info
+    list_init(t->pcb->children);
+    t->pcb->my_info_as_child = NULL;
   }
 
   // here start analysis the commandline just the file_name
@@ -248,7 +267,7 @@ static void start_process(void* info_) {
 
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
-int process_wait(pid_t child_pid UNUSED) {
+int process_wait(pid_t child_pid ) {
   sema_down(&temporary);
   return 0;
 }

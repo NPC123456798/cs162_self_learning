@@ -65,7 +65,7 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
             process_exit();
             return;
         }
-        f->eax = exec(cmd_line);
+        f->eax = process_execute(cmd_line);
         break;
         
     case SYS_WAIT:
@@ -75,7 +75,7 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
             return;
         }
         pid_t pid = *(pid_t*)(f->esp + 4);
-        f->eax = wait(pid);
+        f->eax = process_wait(pid);
         break;
         
     default:
