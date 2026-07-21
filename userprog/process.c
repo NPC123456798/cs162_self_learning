@@ -50,9 +50,12 @@ void userprog_init(void) {
      can come at any time and activate our pagedir */
   t->pcb = calloc(sizeof(struct process), 1);
   success = t->pcb != NULL;
-
   /* Kill the kernel if we did not succeed */
   ASSERT(success);
+
+  list_init(&t->pcb->children);
+  t->pcb->my_info_as_child = NULL;
+
 }
 
 /* Starts a new thread running a user program loaded from
@@ -100,8 +103,7 @@ pid_t process_execute(const char* file_name) {
 
   pid_t result = info->success ? info->child_tid : TID_ERROR;
 
-  if (result != TID_ERROR && thread_current()->pcb != NULL 
-      && thread_current()->pcb->main_thread != NULL) {
+  if (result != TID_ERROR && thread_current()->pcb != NULL) {
     // success: create child process record which is hang on the parent process list
     struct child *child = malloc(sizeof(struct child));
     if (child) {
