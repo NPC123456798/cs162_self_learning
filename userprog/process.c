@@ -125,7 +125,7 @@ pid_t process_execute(const char* file_name) {
 
     }
   }
-
+  sema_up(&info->load_sema);
   free(info);   
   return result;
 }
@@ -203,6 +203,8 @@ static void start_process(void* info_) {
   info->child_info = &t->pcb->my_info_as_child;
   info->child_thread = t;
   sema_up(&info->load_sema);
+  // block child process wait parent process set child well 
+  sema_down(&info->load_sema);
 
   // take all token from file_name or call it command_line    
   
