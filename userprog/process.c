@@ -25,8 +25,7 @@ struct process_load_info {
   struct semaphore load_sema; 
   bool success;               // flag of load success
   tid_t child_tid;            // child thread's tid
-  struct child **child_info; // child thread's info
-  struct thread *child_thread; // child process' thread 
+  struct child *child;
 };
 
 
@@ -86,8 +85,22 @@ pid_t process_execute(const char* file_name) {
   sema_init(&info->load_sema,0);
   info->success = false;
   info->child_tid = TID_ERROR;
-  info->child_info = NULL;
-  info->child_thread = NULL;
+
+
+
+  info->child = malloc(sizeof(struct child));
+  if (info->child == NULL) {
+      palloc_free_page(info->file_name);
+      free(info);
+      return TID_ERROR;
+  }
+
+
+  sema_init(&info->child->wait_sema, 0);
+  info->child->waited = false;
+  info->child->exited = false;
+  info->child->child_thread = NULL;
+
 
   /* Create a new thread to execute FILE_NAME. */
 
@@ -95,6 +108,7 @@ pid_t process_execute(const char* file_name) {
   tid = thread_create(file_name, PRI_DEFAULT, start_process,(void*) info);
   if (tid == TID_ERROR)
   {
+    free(info->child);
     palloc_free_page(info->file_name);
     free(info);
     return tid;
@@ -107,23 +121,16 @@ pid_t process_execute(const char* file_name) {
 
   if (result != TID_ERROR && thread_current()->pcb != NULL) {
     // success: create child process record which is hang on the parent process list
-    struct child *child = malloc(sizeof(struct child));
-    if (child) {
-        child->pid = result;
-        child->exit_status = -1;
-        child->waited = false;
-        child->exited = false;
-        sema_init(&child->wait_sema, 0);
 
-        lock_acquire(&child_lock);
+    lock_acquire(&child_lock);
+    
+    info->child->pid = result;   
+    list_push_back(&thread_current()->pcb->children, &info->child->elem);
 
-        list_push_back(&thread_current()->pcb->children, &child->elem);
-        *info->child_info = child;
-        (*info->child_info)->child_thread = info->child_thread;
-  
-        lock_release(&child_lock);
+    lock_release(&child_lock);
 
-    }
+  } else {
+    free(info->child);
   }
   sema_up(&info->load_sema);
   free(info);   
@@ -197,14 +204,13 @@ static void start_process(void* info_) {
     thread_exit();
   }
 
-
+  t->pcb->my_info_as_child = info->child; 
+  info->child->child_thread = t; 
   info->child_tid = t->tid;
   info->success = true;
-  info->child_info = &t->pcb->my_info_as_child;
-  info->child_thread = t;
   sema_up(&info->load_sema);
-  // block child process wait parent process set child well 
-  sema_down(&info->load_sema);
+
+
 
   // take all token from file_name or call it command_line    
   
