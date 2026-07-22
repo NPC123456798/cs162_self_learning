@@ -29,7 +29,7 @@ struct process_load_info {
 };
 
 
-static struct semaphore temporary;
+
 static struct lock child_lock;
 static thread_func start_process NO_RETURN;
 static thread_func start_pthread NO_RETURN;
@@ -72,7 +72,7 @@ pid_t process_execute(const char* file_name) {
   
   tid_t tid;
   
-  sema_init(&temporary, 0);
+
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   info->file_name = palloc_get_page(0);
@@ -200,7 +200,6 @@ static void start_process(void* info_) {
     info->success = false;
     sema_up(&info->load_sema);
     palloc_free_page(file_name);
-    sema_up(&temporary);
     thread_exit();
   }
 
@@ -290,7 +289,7 @@ static void start_process(void* info_) {
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int process_wait(pid_t child_pid ) {
-  sema_down(&temporary);
+
   return 0;
 }
 
@@ -364,7 +363,7 @@ void process_exit(int status) {
   cur->pcb = NULL;
   free(pcb_to_free);
 
-  sema_up(&temporary);
+
   thread_exit();
 }
 
