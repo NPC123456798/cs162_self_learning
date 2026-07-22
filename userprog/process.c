@@ -289,8 +289,47 @@ static void start_process(void* info_) {
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int process_wait(pid_t child_pid ) {
+  struct thread *cur = thread_current();
+  struct child *target = NULL;
 
-  return 0;
+  lock_acquire(&child_lock);
+
+  /* 1. seek pid in parent children list */
+  struct list *children = &cur->pcb->children;
+  for (struct list_elem *e = list_begin(children);
+        e != list_end(children); e = list_next(e)) {
+      struct child *c = list_entry(e, struct child, elem);
+      if (c->pid == child_pid) {
+          target = c;
+          break;
+      }
+  }
+
+  /* 2. not direct child process , or have been waited.return -1 */
+  if (target == NULL || target->waited) {
+      lock_release(&child_lock);
+      return -1;
+  }
+
+  /* 3. marked waited avoid wait again */
+  target->waited = true;
+
+  /* 4. if child process hasn't been exited, release lock and wait child use sema_down */
+  if (!target->exited) {
+      lock_release(&child_lock);          // release lock let child process can exit
+      sema_down(&target->wait_sema);      // block untill child process sema_up
+      lock_acquire(&child_lock);          // get lock again to safely change data
+  }
+
+  /* 5. get child process exit status */
+  int status = target->exit_status;
+
+  /* 6. free child from parent process children list  */
+  list_remove(&target->elem);
+  free(target);
+
+  lock_release(&child_lock);
+  return status;
 }
 
 /* Free the current process's resources. */
