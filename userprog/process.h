@@ -51,6 +51,7 @@ pid_t process_execute(const char* file_name);
 int process_wait(pid_t);
 void process_exit(int status);
 void process_activate(void);
+pid_t process_fork(struct intr_frame *parent_if);
 
 bool is_main_thread(struct thread*, struct process*);
 pid_t get_pid(struct process*);

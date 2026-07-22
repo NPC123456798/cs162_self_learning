@@ -332,6 +332,7 @@ int process_wait(pid_t child_pid ) {
   return status;
 }
 
+
 /* Free the current process's resources. */
 void process_exit(int status) {
   struct thread* cur = thread_current();
@@ -421,6 +422,186 @@ void process_activate(void) {
      This does nothing if this is not a user process. */
   tss_update();
 }
+
+
+
+struct fork_aux {
+    struct process *pcb;            // 预分配的子进程 PCB
+    struct child *child;            // 父子关系记录
+    struct intr_frame parent_if;    // 父进程的中断帧副本
+};
+
+static void fork_child(void *aux_) {
+  if (aux_ == NULL) {
+    thread_exit();   // 或 process_exit(-1)
+  }
+    struct fork_aux *aux = (struct fork_aux *)aux_;
+    struct thread *t = thread_current();
+
+    // 安装 PCB
+    t->pcb = aux->pcb;
+    t->pcb->main_thread = t;
+
+    // 建立父子关系中的子进程侧
+    t->pcb->my_info_as_child = aux->child;
+    aux->child->child_thread = t;
+
+    // 激活子进程的页目录
+    process_activate();
+
+    // 准备返回用户态的中断帧，设置返回值 0
+    struct intr_frame if_;
+    memcpy(&if_, &aux->parent_if, sizeof if_);
+    if_.eax = 0;    // 子进程返回 0
+
+    // 释放辅助结构体（由父进程分配）
+    free(aux);
+
+    // 跳转到用户态
+    asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_));
+    NOT_REACHED();
+}
+
+static bool copy_page_table(uint32_t *dst_pd, uint32_t *src_pd) {
+    for (uint32_t vaddr = 0; vaddr < PHYS_BASE; vaddr += PGSIZE) {
+        // 获取父进程页面的内核虚拟地址（同时验证页面存在）
+        void *src_kpage = pagedir_get_page(src_pd, (void *)vaddr);
+        if (src_kpage == NULL)
+            continue;   // 未映射，跳过
+
+        // 获取父页的写权限（通过新增的公开函数）
+        bool writable = pagedir_is_writable(src_pd, (void *)vaddr);
+
+        // 为子进程分配新物理页
+        void *dst_kpage = palloc_get_page(PAL_USER | PAL_ZERO);
+        if (dst_kpage == NULL)
+            return false;
+
+        // 复制内容
+        memcpy(dst_kpage, src_kpage, PGSIZE);
+
+        // 在子进程页表中建立相同映射
+        if (!pagedir_set_page(dst_pd, (void *)vaddr, dst_kpage, writable)) {
+            palloc_free_page(dst_kpage);
+            return false;
+        }
+    }
+    return true;
+}
+
+
+pid_t process_fork(struct intr_frame *parent_if) {
+   struct thread *cur = thread_current();
+    struct process *parent_pcb = cur->pcb;
+
+    // 1. 创建子进程页目录
+    uint32_t *child_pagedir = pagedir_create();
+    if (child_pagedir == NULL)
+        return TID_ERROR;
+
+    // 2. 复制地址空间
+    if (!copy_page_table(child_pagedir, parent_pcb->pagedir)) {
+        pagedir_destroy(child_pagedir);
+        return TID_ERROR;
+    }
+
+    // 3. 分配并初始化子进程 PCB
+    struct process *child_pcb = malloc(sizeof *child_pcb);
+    if (child_pcb == NULL) {
+        pagedir_destroy(child_pagedir);
+        return TID_ERROR;
+    }
+    child_pcb->pagedir = child_pagedir;
+    memcpy(child_pcb->process_name, parent_pcb->process_name,
+           sizeof parent_pcb->process_name);
+    list_init(&child_pcb->children);
+    child_pcb->my_info_as_child = NULL;  // 稍后设置
+    child_pcb->main_thread = NULL;       // 子线程自己设置
+
+    // 4. 建立父子关系
+    struct child *child = malloc(sizeof *child);
+    if (child == NULL) {
+        free(child_pcb);
+        pagedir_destroy(child_pagedir);
+        return TID_ERROR;
+    }
+    sema_init(&child->wait_sema, 0);
+    child->pid = -1;          // 暂时未知，等线程创建后赋值
+    child->exit_status = -1;
+    child->waited = false;
+    child->exited = false;
+    child->child_thread = NULL; // 子线程自己设置
+
+    // 5. 构建子线程的辅助数据
+    struct fork_aux *aux = malloc(sizeof *aux);
+    if (aux == NULL) {
+        free(child);
+        free(child_pcb);
+        pagedir_destroy(child_pagedir);
+        return TID_ERROR;
+    }
+    aux->pcb = child_pcb;
+    aux->child = child;
+    memcpy(&aux->parent_if, parent_if, sizeof *parent_if);
+
+    // 6. 创建子线程
+    tid_t child_tid = thread_create(parent_pcb->process_name,
+                                    PRI_DEFAULT, fork_child, aux);
+    if (child_tid == TID_ERROR) {
+        free(aux);
+        free(child);
+        free(child_pcb);
+        pagedir_destroy(child_pagedir);
+        return TID_ERROR;
+    }
+
+    // 7. 补全 child 信息并挂入父进程链表（需要加锁）
+    child->pid = child_tid;
+    lock_acquire(&child_lock);
+    list_push_back(&parent_pcb->children, &child->elem);
+    lock_release(&child_lock);
+
+    // 注意：子进程的 my_info_as_child 已在 fork_child 中设置，这里不用再设
+    // 因为子线程可能在锁释放之前就运行并设置，但锁不保护这个指针，可再设置一次以确保，但没必要。
+
+    return child_tid;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 /* We load ELF binaries.  The following definitions are taken
    from the ELF specification, [ELF1], more-or-less verbatim.  */
@@ -790,3 +971,4 @@ void pthread_exit(void) {}
    This function will be implemented in Project 2: Multithreading. For
    now, it does nothing. */
 void pthread_exit_main(void) {}
+

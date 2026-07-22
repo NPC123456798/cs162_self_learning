@@ -136,6 +136,17 @@ void pagedir_clear_page(uint32_t* pd, void* upage) {
   }
 }
 
+
+/* Returns true if the page at user virtual address VADDR in
+   page directory PD is marked writable (PTE_W).
+   Returns false if PD contains no PTE for VADDR, or if the
+   page is read-only. */
+bool pagedir_is_writable(uint32_t *pd, const void *vaddr) {
+    uint32_t *pte = lookup_page(pd, vaddr, false);
+    return pte != NULL && (*pte & PTE_W) != 0;
+}
+
+
 /* Returns true if the PTE for virtual page VPAGE in PD is dirty,
    that is, if the page has been modified since the PTE was
    installed.
