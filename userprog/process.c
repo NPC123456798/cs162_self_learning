@@ -20,7 +20,7 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "userprog/syscall.h"
-#include "threads/interrupt.h" 
+
 
 
 struct process_load_info {
@@ -501,7 +501,7 @@ static void fork_child(void *aux_) {
 }
 
 static bool copy_page_table(uint32_t *dst_pd, uint32_t *src_pd) {
-    for (uint32_t vaddr = 0; vaddr < PHYS_BASE; vaddr += PGSIZE) {
+    for (uint32_t vaddr = 0; vaddr < (uint32_t) PHYS_BASE; vaddr += PGSIZE) {
         // get parent process page's kernel virtual address and check if page mapped
         void *src_kpage = pagedir_get_page(src_pd, (void *)vaddr);
         if (src_kpage == NULL)

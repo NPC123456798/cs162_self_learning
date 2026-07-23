@@ -15,6 +15,8 @@
 #define MAX_ARGS 64
 
 
+struct intr_frame;  
+
 /* PIDs and TIDs are the same type. PID should be
    the TID of the main thread of the process */
 typedef tid_t pid_t;
