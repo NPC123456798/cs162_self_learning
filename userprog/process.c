@@ -464,23 +464,23 @@ static void fork_child(void *aux_) {
 
 static bool copy_page_table(uint32_t *dst_pd, uint32_t *src_pd) {
     for (uint32_t vaddr = 0; vaddr < PHYS_BASE; vaddr += PGSIZE) {
-        // 获取父进程页面的内核虚拟地址（同时验证页面存在）
+        // get parent process page's kernel virtual address and check if page mapped
         void *src_kpage = pagedir_get_page(src_pd, (void *)vaddr);
         if (src_kpage == NULL)
-            continue;   // 未映射，跳过
+            continue;   // unmapped,continue
 
-        // 获取父页的写权限（通过新增的公开函数）
+        // get parent mapped page writeable 
         bool writable = pagedir_is_writable(src_pd, (void *)vaddr);
 
-        // 为子进程分配新物理页
+        // allocate new page for child process, return address is kernel virtual address
         void *dst_kpage = palloc_get_page(PAL_USER | PAL_ZERO);
         if (dst_kpage == NULL)
             return false;
 
-        // 复制内容
+        // copy content form parent process page
         memcpy(dst_kpage, src_kpage, PGSIZE);
 
-        // 在子进程页表中建立相同映射
+        // set new allocated page in child process page table
         if (!pagedir_set_page(dst_pd, (void *)vaddr, dst_kpage, writable)) {
             palloc_free_page(dst_kpage);
             return false;
