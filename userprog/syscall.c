@@ -82,6 +82,42 @@ static void syscall_handler(struct intr_frame* f ) {
         f->eax = process_fork(f);
         break;
 
+    case SYS_CREATE:
+    // TODO: implement create
+        break;
+
+    case SYS_REMOVE:
+        // TODO: implement remove
+        break;
+
+    case SYS_OPEN:
+        // TODO: implement open
+        break;
+
+    case SYS_FILESIZE:
+        // TODO: implement filesize
+        break;
+
+    case SYS_READ:
+        // TODO: implement read
+        break;
+
+    case SYS_WRITE:
+        // TODO: implement write
+        break;
+
+    case SYS_SEEK:
+        // TODO: implement seek
+        break;
+
+    case SYS_TELL:
+        // TODO: implement tell
+        break;
+        
+    case SYS_CLOSE:
+        // TODO: implement close
+        break;
+
     default:
 
         process_exit(-1);
