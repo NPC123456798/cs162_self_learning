@@ -9,8 +9,15 @@
 #include "devices/shutdown.h"
 #include "filesys/filesys.h"
 #include "lib/kernel/console.h"
+#include "devices/input.h"
+
+
 
 struct lock filesys_lock;   // protect file system operation global lock
+
+static bool verify_user_range(const void *uaddr, size_t size);
+static bool verify_user_string(const char *str);
+
 
 static void syscall_handler(struct intr_frame*);
 
@@ -244,8 +251,7 @@ static void syscall_handler(struct intr_frame* f ) {
                 process_exit(-1);
                 break;
             }
-            
-            uint32_t *pd = thread_current()->pcb->pagedir;
+
 
 
             if (read_size > 0) {

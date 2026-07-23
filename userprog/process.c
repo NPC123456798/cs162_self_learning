@@ -20,6 +20,9 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "userprog/syscall.h"
+#include "threads/interrupt.h" 
+
+
 struct process_load_info {
   char *file_name;            // executable file name
   struct semaphore load_sema; 
@@ -161,7 +164,7 @@ static void start_process(void* info_) {
     strlcpy(t->pcb->process_name, t->name, sizeof t->name);
 
     // add init for child process info
-    list_init(t->pcb->children);
+    list_init(&t->pcb->children);
     t->pcb->my_info_as_child = NULL;
 
 
