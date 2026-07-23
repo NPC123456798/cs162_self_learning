@@ -159,14 +159,13 @@ static void syscall_handler(struct intr_frame* f ) {
         // allocate file description and jump over 0 and 1
         struct thread *cur = thread_current();
         struct process *pcb = cur->pcb;
-        int fd;
+        int fd = -1;
         for (fd = 2; fd < MAX_FILES; fd++) {
             if (pcb->files[fd] == NULL) {
                 pcb->files[fd] = f_ptr;
                 break;
             }
         }
-        lock_release(&filesys_lock);
 
         if (fd == MAX_FILES) {
             // if file description table is full then return -1
@@ -175,8 +174,11 @@ static void syscall_handler(struct intr_frame* f ) {
         } else {
             f->eax = fd;
         }
+        lock_release(&filesys_lock);
+
+
         break;
-        
+
     case SYS_FILESIZE:
         // TODO: implement filesize
         break;
