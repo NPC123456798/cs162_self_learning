@@ -37,336 +37,361 @@ static void syscall_handler(struct intr_frame* f ) {
   switch (syscall_no)
   {
     case SYS_HALT:
-        shutdown_power_off();
-        break;
-    case SYS_EXIT:
-
-        if (!verify_user_range((void*)(f->esp + 4), sizeof(int))) {
-            process_exit(-1);
-            return;
+        {
+            shutdown_power_off();
+            break;
         }
-        int status = *(int*)(f->esp + 4);
-        f->eax = status;
-        printf("%s: exit(%d)\n", thread_current()->pcb->process_name, status);
-        process_exit(status);
-        break;
+    case SYS_EXIT:
+        {
+            if (!verify_user_range((void*)(f->esp + 4), sizeof(int))) {
+                process_exit(-1);
+                return;
+            }
+            int status = *(int*)(f->esp + 4);
+            f->eax = status;
+            printf("%s: exit(%d)\n", thread_current()->pcb->process_name, status);
+            process_exit(status);
+            break;
+        }
         
     case SYS_PRACTICE:
-
-        if (!verify_user_range((void*)(f->esp + 4), sizeof(int))) {
-            process_exit(-1);
-            return;
+        {
+            if (!verify_user_range((void*)(f->esp + 4), sizeof(int))) {
+                process_exit(-1);
+                return;
+            }
+            int i = *(int*)(f->esp + 4);
+            f->eax = i + 1;
+            break;
         }
-        int i = *(int*)(f->esp + 4);
-        f->eax = i + 1;
-        break;
         
     case SYS_EXEC:
-        if (!verify_user_range((void*)(f->esp + 4), sizeof(char*))) {
-            process_exit(-1);
-            return;
-        }
-        char* cmd_line = *(char**)(f->esp + 4);
+        {    
+            if (!verify_user_range((void*)(f->esp + 4), sizeof(char*))) {
+                process_exit(-1);
+                return;
+            }
+            char* cmd_line = *(char**)(f->esp + 4);
 
-        if (!verify_user_string(cmd_line)) {
-            process_exit(-1);
-            return;
+            if (!verify_user_string(cmd_line)) {
+                process_exit(-1);
+                return;
+            }
+            f->eax = process_execute(cmd_line);
+            break;
         }
-        f->eax = process_execute(cmd_line);
-        break;
         
     case SYS_WAIT:
-
-        if (!verify_user_range((void*)(f->esp + 4), sizeof(int))) {
-            process_exit(-1);
-            return;
+        {
+            if (!verify_user_range((void*)(f->esp + 4), sizeof(int))) {
+                process_exit(-1);
+                return;
+            }
+            pid_t pid = *(pid_t*)(f->esp + 4);
+            f->eax = process_wait(pid);
+            break;
         }
-        pid_t pid = *(pid_t*)(f->esp + 4);
-        f->eax = process_wait(pid);
-        break;
     
     case SYS_FORK:
-        f->eax = process_fork(f);
-        break;
+        {     
+            f->eax = process_fork(f);
+            break;
+        }
 
     case SYS_CREATE:
-        // verify argument file name pointer itself
-        if (!verify_user_range(&args[1], sizeof(char*))) {
-            process_exit(-1);
-            break;
-        }
-        char *file = (char*)args[1];
-        // verify file name string 
-        if (!verify_user_string(file)) {
-            process_exit(-1);
-            break;
-        }
-        // verify initial size argument
-        if (!verify_user_range(&args[2], sizeof(unsigned))) {
-            process_exit(-1);
-            break;
-        }
-        unsigned initial_size = (unsigned)args[2];
-        
-        lock_acquire(&filesys_lock);
-        bool ok = filesys_create(file, initial_size);
-        lock_release(&filesys_lock);
-        f->eax = ok;
-
-        break;
-
-    case SYS_REMOVE:
-        // verify argument file name pointer itself
-        if (!verify_user_range(&args[1], sizeof(char *))) {
-            process_exit(-1);
-            break;
-        }
-        char *file = *(char **)&args[1];
-        // verify file name string 
-        if (!verify_user_string(file)) {
-            process_exit(-1);
-            break;
-        }
-
-        lock_acquire(&filesys_lock);
-        bool ok = filesys_remove(file);
-        lock_release(&filesys_lock);
-
-        f->eax = ok;
-
-        break;
-
-    case SYS_OPEN:
-        // verify argument file name pointer itself
-        if (!verify_user_range(&args[1], sizeof(char *))) {
-            process_exit(-1);
-            break;
-        }
-        char *file = *(char **)&args[1];
-        // verify file name string 
-        if (!verify_user_string(file)) {
-            process_exit(-1);
-            break;
-        }
-
-        lock_acquire(&filesys_lock);
-        struct file *f_ptr = filesys_open(file);
-        if (f_ptr == NULL) {
-            lock_release(&filesys_lock);
-            f->eax = -1;
-            break;
-        }
-
-        // allocate file description and jump over 0 and 1
-        struct thread *cur = thread_current();
-        struct process *pcb = cur->pcb;
-        int fd = -1;
-        for (fd = 2; fd < MAX_FILES; fd++) {
-            if (pcb->files[fd] == NULL) {
-                pcb->files[fd] = f_ptr;
+        {    
+            // verify argument file name pointer itself
+            if (!verify_user_range(&args[1], sizeof(char*))) {
+                process_exit(-1);
                 break;
             }
+            char *file = (char*)args[1];
+            // verify file name string 
+            if (!verify_user_string(file)) {
+                process_exit(-1);
+                break;
+            }
+            // verify initial size argument
+            if (!verify_user_range(&args[2], sizeof(unsigned))) {
+                process_exit(-1);
+                break;
+            }
+            unsigned initial_size = (unsigned)args[2];
+            
+            lock_acquire(&filesys_lock);
+            bool ok = filesys_create(file, initial_size);
+            lock_release(&filesys_lock);
+            f->eax = ok;
+
+            break;
         }
 
-        if (fd == MAX_FILES) {
-            // if file description table is full then return -1
-            file_close(f_ptr);
-            f->eax = -1;
-        } else {
-            f->eax = fd;
+    case SYS_REMOVE:
+        {    
+            // verify argument file name pointer itself
+            if (!verify_user_range(&args[1], sizeof(char *))) {
+                process_exit(-1);
+                break;
+            }
+            char *file = *(char **)&args[1];
+            // verify file name string 
+            if (!verify_user_string(file)) {
+                process_exit(-1);
+                break;
+            }
+
+            lock_acquire(&filesys_lock);
+            bool ok = filesys_remove(file);
+            lock_release(&filesys_lock);
+
+            f->eax = ok;
+
+            break;
         }
-        lock_release(&filesys_lock);
+
+    case SYS_OPEN:
+        {    
+            // verify argument file name pointer itself
+            if (!verify_user_range(&args[1], sizeof(char *))) {
+                process_exit(-1);
+                break;
+            }
+            char *file = *(char **)&args[1];
+            // verify file name string 
+            if (!verify_user_string(file)) {
+                process_exit(-1);
+                break;
+            }
+
+            lock_acquire(&filesys_lock);
+            struct file *f_ptr = filesys_open(file);
+            if (f_ptr == NULL) {
+                lock_release(&filesys_lock);
+                f->eax = -1;
+                break;
+            }
+
+            // allocate file description and jump over 0 and 1
+            struct thread *cur = thread_current();
+            struct process *pcb = cur->pcb;
+            int fd = -1;
+            for (fd = 2; fd < MAX_FILES; fd++) {
+                if (pcb->files[fd] == NULL) {
+                    pcb->files[fd] = f_ptr;
+                    break;
+                }
+            }
+
+            if (fd == MAX_FILES) {
+                // if file description table is full then return -1
+                file_close(f_ptr);
+                f->eax = -1;
+            } else {
+                f->eax = fd;
+            }
+            lock_release(&filesys_lock);
 
 
-        break;
+            break;
+        }
 
     case SYS_FILESIZE:
-        // verify fd 
-        if (!verify_user_range(&args[1], sizeof(int))) {
-            process_exit(-1);
+        {    
+            // verify fd 
+            if (!verify_user_range(&args[1], sizeof(int))) {
+                process_exit(-1);
+                break;
+            }
+            int fd = args[1];
+            struct thread *cur = thread_current();
+            struct process *pcb = cur->pcb;
+            
+            // check fd validation 
+            if (fd < 0 || fd >= MAX_FILES || pcb->files[fd] == NULL) {
+                f->eax = -1;
+                break;
+            }
+            
+            lock_acquire(&filesys_lock);
+            off_t file_size = file_length(pcb->files[fd]);
+            lock_release(&filesys_lock);
+            f->eax = file_size;
             break;
         }
-        int fd = args[1];
-        struct thread *cur = thread_current();
-        struct process *pcb = cur->pcb;
-        
-        // check fd validation 
-        if (fd < 0 || fd >= MAX_FILES || pcb->files[fd] == NULL) {
-            f->eax = -1;
-            break;
-        }
-        
-        lock_acquire(&filesys_lock);
-        off_t file_size = file_length(pcb->files[fd]);
-        lock_release(&filesys_lock);
-        f->eax = file_size;
-        break;
 
     case SYS_READ:
-        // verify fd
-        if (!verify_user_range(&args[1], sizeof(int))) {
-            process_exit(-1);
-            break;
-        }
-        int fd = args[1];
-        // verify buffer pointer
-        if (!verify_user_range(&args[2], sizeof(void *))) {
-            process_exit(-1);
-            break;
-        }
-        void *buffer = *(void **)&args[2];
-        // verify size
-        if (!verify_user_range(&args[3], sizeof(unsigned))) {
-            process_exit(-1);
-            break;
-        }
-        unsigned read_size = args[3];
-        // verify buffer writable (whole block)
-        if (!verify_user_range(buffer, read_size)) {
-            process_exit(-1);
-            break;
-        }
-        
-        struct thread *cur = thread_current();
-        struct process *pcb = cur->pcb;
-        
-        if (fd == STDIN_FILENO) {  // 0
-            // stdin: input with byte one byte
-            int total = 0;
-            uint8_t *buf = (uint8_t *)buffer;
-            for (unsigned i = 0; i < read_size; i++) {
-                int c = input_getc();
-                if (c == -1)
-                    break;
-                buf[i] = (uint8_t)c;
-                total++;
+        {    
+            // verify fd
+            if (!verify_user_range(&args[1], sizeof(int))) {
+                process_exit(-1);
+                break;
             }
-            f->eax = total;
-        } else if (fd < 0 || fd >= MAX_FILES || pcb->files[fd] == NULL) {
-            f->eax = -1;
-        } else {
-            lock_acquire(&filesys_lock);
-            off_t bytes = file_read(pcb->files[fd], buffer, (off_t) read_size);
-            lock_release(&filesys_lock);
-            f->eax = bytes;
+            int fd = args[1];
+            // verify buffer pointer
+            if (!verify_user_range(&args[2], sizeof(void *))) {
+                process_exit(-1);
+                break;
+            }
+            void *buffer = *(void **)&args[2];
+            // verify size
+            if (!verify_user_range(&args[3], sizeof(unsigned))) {
+                process_exit(-1);
+                break;
+            }
+            unsigned read_size = args[3];
+            // verify buffer writable (whole block)
+            if (!verify_user_range(buffer, read_size)) {
+                process_exit(-1);
+                break;
+            }
+            
+            struct thread *cur = thread_current();
+            struct process *pcb = cur->pcb;
+            
+            if (fd == STDIN_FILENO) {  // 0
+                // stdin: input with byte one byte
+                int total = 0;
+                uint8_t *buf = (uint8_t *)buffer;
+                for (unsigned i = 0; i < read_size; i++) {
+                    int c = input_getc();
+                    if (c == -1)
+                        break;
+                    buf[i] = (uint8_t)c;
+                    total++;
+                }
+                f->eax = total;
+            } else if (fd < 0 || fd >= MAX_FILES || pcb->files[fd] == NULL) {
+                f->eax = -1;
+            } else {
+                lock_acquire(&filesys_lock);
+                off_t bytes = file_read(pcb->files[fd], buffer, (off_t) read_size);
+                lock_release(&filesys_lock);
+                f->eax = bytes;
+            }
+            break;
         }
-        break;
 
     case SYS_WRITE:
-         // verify fd
-        if (!verify_user_range(&args[1], sizeof(int))) {
-            process_exit(-1);
+        {    
+            // verify fd
+            if (!verify_user_range(&args[1], sizeof(int))) {
+                process_exit(-1);
+                break;
+            }
+            int fd = args[1];
+            // verify buffer pointer
+            if (!verify_user_range(&args[2], sizeof(void *))) {
+                process_exit(-1);
+                break;
+            }
+            const void *buffer = *(const void **)&args[2];
+            // verify size
+            if (!verify_user_range(&args[3], sizeof(unsigned))) {
+                process_exit(-1);
+                break;
+            }
+            unsigned write_size = args[3];
+            // verify buffer readable (whole block)
+            if (!verify_user_range((void *)buffer, write_size)) {
+                process_exit(-1);
+                break;
+            }
+            
+            struct thread *cur = thread_current();
+            struct process *pcb = cur->pcb;
+            
+            if (fd == STDOUT_FILENO) {  // 1
+                putbuf((const char *)buffer, write_size);
+                f->eax = write_size;
+            } else if (fd < 0 || fd >= MAX_FILES || pcb->files[fd] == NULL) {
+                f->eax = -1;
+            } else {
+                lock_acquire(&filesys_lock);
+                off_t bytes = file_write(pcb->files[fd], buffer, write_size);
+                lock_release(&filesys_lock);
+                f->eax = bytes;
+            }
             break;
         }
-        int fd = args[1];
-        // verify buffer pointer
-        if (!verify_user_range(&args[2], sizeof(void *))) {
-            process_exit(-1);
-            break;
-        }
-        const void *buffer = *(const void **)&args[2];
-        // verify size
-        if (!verify_user_range(&args[3], sizeof(unsigned))) {
-            process_exit(-1);
-            break;
-        }
-        unsigned write_size = args[3];
-        // verify buffer readable (whole block)
-        if (!verify_user_range((void *)buffer, write_size)) {
-            process_exit(-1);
-            break;
-        }
-        
-        struct thread *cur = thread_current();
-        struct process *pcb = cur->pcb;
-        
-        if (fd == STDOUT_FILENO) {  // 1
-            putbuf((const char *)buffer, write_size);
-            f->eax = write_size;
-        } else if (fd < 0 || fd >= MAX_FILES || pcb->files[fd] == NULL) {
-            f->eax = -1;
-        } else {
-            lock_acquire(&filesys_lock);
-            off_t bytes = file_write(pcb->files[fd], buffer, write_size);
-            lock_release(&filesys_lock);
-            f->eax = bytes;
-        }
-        break;
-
     case SYS_SEEK:
-        // verify fd
-        if (!verify_user_range(&args[1], sizeof(int))) {
-            process_exit(-1);
+        {    
+            // verify fd
+            if (!verify_user_range(&args[1], sizeof(int))) {
+                process_exit(-1);
+                break;
+            }
+            int fd = args[1];
+            // verify position
+            if (!verify_user_range(&args[2], sizeof(unsigned))) {
+                process_exit(-1);
+                break;
+            }
+            unsigned position = args[2];
+            
+            struct thread *cur = thread_current();
+            struct process *pcb = cur->pcb;
+            
+            if (fd < 0 || fd >= MAX_FILES || pcb->files[fd] == NULL) {
+                // if fd invalid do nothing
+                break;
+            }
+            
+            lock_acquire(&filesys_lock);
+            file_seek(pcb->files[fd], position);
+            lock_release(&filesys_lock);
             break;
         }
-        int fd = args[1];
-        // verify position
-        if (!verify_user_range(&args[2], sizeof(unsigned))) {
-            process_exit(-1);
-            break;
-        }
-        unsigned position = args[2];
-        
-        struct thread *cur = thread_current();
-        struct process *pcb = cur->pcb;
-        
-        if (fd < 0 || fd >= MAX_FILES || pcb->files[fd] == NULL) {
-            // if fd invalid do nothing
-            break;
-        }
-        
-        lock_acquire(&filesys_lock);
-        file_seek(pcb->files[fd], position);
-        lock_release(&filesys_lock);
-        break;
 
     case SYS_TELL:
-       // verify fd
-        if (!verify_user_range(&args[1], sizeof(int))) {
-            process_exit(-1);
+        {
+            // verify fd
+            if (!verify_user_range(&args[1], sizeof(int))) {
+                process_exit(-1);
+                break;
+            }
+            int fd = args[1];
+            struct thread *cur = thread_current();
+            struct process *pcb = cur->pcb;
+            
+            if (fd < 0 || fd >= MAX_FILES || pcb->files[fd] == NULL) {
+                f->eax = -1;  // just return -1
+                break;
+            }
+            
+            lock_acquire(&filesys_lock);
+            off_t pos = file_tell(pcb->files[fd]);
+            lock_release(&filesys_lock);
+            f->eax = pos;
             break;
         }
-        int fd = args[1];
-        struct thread *cur = thread_current();
-        struct process *pcb = cur->pcb;
-        
-        if (fd < 0 || fd >= MAX_FILES || pcb->files[fd] == NULL) {
-            f->eax = -1;  // just return -1
-            break;
-        }
-        
-        lock_acquire(&filesys_lock);
-        off_t pos = file_tell(pcb->files[fd]);
-        lock_release(&filesys_lock);
-        f->eax = pos;
-        break;
 
     case SYS_CLOSE:
-        // verify fd
-        if (!verify_user_range(&args[1], sizeof(int))) {
-            process_exit(-1);
+        {    
+            // verify fd
+            if (!verify_user_range(&args[1], sizeof(int))) {
+                process_exit(-1);
+                break;
+            }
+            int fd = args[1];
+            struct thread *cur = thread_current();
+            struct process *pcb = cur->pcb;
+            
+            if (fd < 0 || fd >= MAX_FILES || pcb->files[fd] == NULL) {
+                f->eax = -1;  // just return -1 if fd invalid
+                break;
+            }
+            
+            lock_acquire(&filesys_lock);
+            file_close(pcb->files[fd]);
+            pcb->files[fd] = NULL;
+            lock_release(&filesys_lock);
             break;
         }
-        int fd = args[1];
-        struct thread *cur = thread_current();
-        struct process *pcb = cur->pcb;
-        
-        if (fd < 0 || fd >= MAX_FILES || pcb->files[fd] == NULL) {
-            f->eax = -1;  // just return -1 if fd invalid
-            break;
-        }
-        
-        lock_acquire(&filesys_lock);
-        file_close(pcb->files[fd]);
-        pcb->files[fd] = NULL;
-        lock_release(&filesys_lock);
-        break;
-
     default:
 
         process_exit(-1);
         break;
-  }
+    }
 
 
 
@@ -391,11 +416,23 @@ static void syscall_handler(struct intr_frame* f ) {
 
 
 static bool verify_user_range(const void *uaddr, size_t size) {
+    if (size == 0)
+    {
+        return true;
+    }
+    
     if (!is_user_vaddr(uaddr))
+    { 
         return false;
+    }
 
     uint8_t *start = (uint8_t *)uaddr;
     uint8_t *end = start + size;
+    // check circle or overflow into kernel
+    if (end < start || end > (uint8_t *)PHYS_BASE){
+        return false;
+    } 
+
     uint32_t *pd = thread_current()->pcb->pagedir;
 
     // check start byte if is in the page
