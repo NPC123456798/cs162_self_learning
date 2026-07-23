@@ -436,6 +436,7 @@ struct fork_aux {
     struct process *pcb;            // pre allocated for child PCB
     struct child *child;            // record for parent child relationship
     struct intr_frame parent_if;    // copy of parent infr_frame
+    struct semaphore init_sema; 
 };
 
 static void fork_child(void *aux_) {
@@ -450,11 +451,15 @@ static void fork_child(void *aux_) {
     t->pcb->main_thread = t;
 
     // set child and child thread for child process accessing child
+    lock_acquire(&child_lock);
     t->pcb->my_info_as_child = aux->child;
     aux->child->child_thread = t;
+    lock_release(&child_lock);
 
     // activate child process page dir
     process_activate();
+
+    sema_up(&aux->init_sema);
 
     // set intr frame for return to user state,set return value 0
     struct intr_frame if_;
@@ -558,6 +563,7 @@ pid_t process_fork(struct intr_frame *parent_if) {
     aux->pcb = child_pcb;
     aux->child = child;
     memcpy(&aux->parent_if, parent_if, sizeof *parent_if);
+    sema_init(&aux->init_sema, 0);  
 
     // 6. create child thread
     tid_t child_tid = thread_create(parent_pcb->process_name,
@@ -569,10 +575,12 @@ pid_t process_fork(struct intr_frame *parent_if) {
         pagedir_destroy(child_pagedir);
         return TID_ERROR;
     }
+    sema_down(&aux->init_sema); 
+
 
     // 7. complete child and insert child to parent process children list to construct parent child relationship
-    child->pid = child_tid;
     lock_acquire(&child_lock);
+    child->pid = child_tid;
     list_push_back(&parent_pcb->children, &child->elem);
     lock_release(&child_lock);
 
