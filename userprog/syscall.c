@@ -428,7 +428,7 @@ static bool verify_user_range(const void *uaddr, size_t size) {
 
     uint8_t *start = (uint8_t *)uaddr;
     uint8_t *end = start + size;
-    // check circle or overflow into kernel
+    // check circle or overflow into kernel.
     if (end < start || end > (uint8_t *)PHYS_BASE){
         return false;
     } 
