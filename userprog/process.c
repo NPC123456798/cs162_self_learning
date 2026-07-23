@@ -163,6 +163,13 @@ static void start_process(void* info_) {
     // add init for child process info
     list_init(t->pcb->children);
     t->pcb->my_info_as_child = NULL;
+
+
+    // add init for file description table
+    for (int i = 0; i < MAX_FILES; i++) {
+      new_pcb->files[i] = NULL;
+    }
+    new_pcb->next_fd = 2; // 0, 1 for std in and out  
   }
 
   // here start analysis the commandline just the file_name
@@ -511,12 +518,20 @@ pid_t process_fork(struct intr_frame *parent_if) {
         pagedir_destroy(child_pagedir);
         return TID_ERROR;
     }
+
     child_pcb->pagedir = child_pagedir;
     memcpy(child_pcb->process_name, parent_pcb->process_name,
           sizeof parent_pcb->process_name);
     list_init(&child_pcb->children);
     child_pcb->my_info_as_child = NULL;  
     child_pcb->main_thread = NULL;       
+    for (int i = 0; i < MAX_FILES; i++) {
+        child_pcb->files[i] = parent_pcb->files[i];
+    }
+    child_pcb->next_fd = parent_pcb->next_fd;
+
+
+
 
     // 4. construct parent child relationship
     struct child *child = malloc(sizeof *child);

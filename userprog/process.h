@@ -2,12 +2,14 @@
 #define USERPROG_PROCESS_H
 
 #include "threads/thread.h"
+#include "filesys/file.h"
 #include <stdint.h>
 
 // At most 8MB can be allocated to the stack
 // These defines will be used in Project 2: Multithreading
 #define MAX_STACK_PAGES (1 << 11)
 #define MAX_THREADS 127
+#define MAX_FILES 128
 
 // used in start_process function
 #define MAX_ARGS 64
@@ -33,6 +35,10 @@ struct process {
    struct thread* main_thread; /* Pointer to main thread */
    struct list children;
    struct child *my_info_as_child; // it points to parent process' child process which is this current process in parent process' children list
+
+   /* File descriptor table. */
+   struct file *files[MAX_FILES];      
+   int next_fd; 
 };
 
 struct child {
