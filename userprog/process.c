@@ -451,6 +451,7 @@ static void fork_child(void *aux_) {
     t->pcb->main_thread = t;
 
     // set child and child thread for child process accessing child
+    // TODO:here lock is not really necessary, should think about it in the future
     lock_acquire(&child_lock);
     t->pcb->my_info_as_child = aux->child;
     aux->child->child_thread = t;
