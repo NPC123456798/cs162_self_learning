@@ -42,7 +42,7 @@ struct child {
    bool exited;
    struct semaphore wait_sema; // shared by parent and child process
    struct list_elem elem;     
-   struct thread *child_thread; // point to child process itself
+   struct thread *child_thread; // point to thread of child process itself
 };
 
 void userprog_init(void);

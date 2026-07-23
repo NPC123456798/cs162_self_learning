@@ -426,39 +426,39 @@ void process_activate(void) {
 
 
 struct fork_aux {
-    struct process *pcb;            // 预分配的子进程 PCB
-    struct child *child;            // 父子关系记录
-    struct intr_frame parent_if;    // 父进程的中断帧副本
+    struct process *pcb;            // pre allocated for child PCB
+    struct child *child;            // record for parent child relationship
+    struct intr_frame parent_if;    // copy of parent infr_frame
 };
 
 static void fork_child(void *aux_) {
   if (aux_ == NULL) {
-    thread_exit();   // 或 process_exit(-1)
+    thread_exit();   // or process_exit(-1)
   }
     struct fork_aux *aux = (struct fork_aux *)aux_;
     struct thread *t = thread_current();
 
-    // 安装 PCB
+    // set PCB for child thread and main thread for  child process
     t->pcb = aux->pcb;
     t->pcb->main_thread = t;
 
-    // 建立父子关系中的子进程侧
+    // set child and child thread for child process accessing child
     t->pcb->my_info_as_child = aux->child;
     aux->child->child_thread = t;
 
-    // 激活子进程的页目录
+    // activate child process page dir
     process_activate();
 
-    // 准备返回用户态的中断帧，设置返回值 0
+    // set intr frame for return to user state,set return value 0
     struct intr_frame if_;
     memcpy(&if_, &aux->parent_if, sizeof if_);
-    if_.eax = 0;    // 子进程返回 0
+    if_.eax = 0;    // child process return 0
 
-    // 释放辅助结构体（由父进程分配）
+    // free helper struct data which allocated by parent process
     free(aux);
 
-    // 跳转到用户态
-    asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_));
+    // goto userspace
+    asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
     NOT_REACHED();
 }
 
@@ -494,18 +494,18 @@ pid_t process_fork(struct intr_frame *parent_if) {
    struct thread *cur = thread_current();
     struct process *parent_pcb = cur->pcb;
 
-    // 1. 创建子进程页目录
+    // 1. create child process page directory
     uint32_t *child_pagedir = pagedir_create();
     if (child_pagedir == NULL)
         return TID_ERROR;
 
-    // 2. 复制地址空间
+    // 2. copy parent process pages to child process page and set child process page table
     if (!copy_page_table(child_pagedir, parent_pcb->pagedir)) {
         pagedir_destroy(child_pagedir);
         return TID_ERROR;
     }
 
-    // 3. 分配并初始化子进程 PCB
+    // 3. allocate and init child process
     struct process *child_pcb = malloc(sizeof *child_pcb);
     if (child_pcb == NULL) {
         pagedir_destroy(child_pagedir);
@@ -513,12 +513,12 @@ pid_t process_fork(struct intr_frame *parent_if) {
     }
     child_pcb->pagedir = child_pagedir;
     memcpy(child_pcb->process_name, parent_pcb->process_name,
-           sizeof parent_pcb->process_name);
+          sizeof parent_pcb->process_name);
     list_init(&child_pcb->children);
-    child_pcb->my_info_as_child = NULL;  // 稍后设置
-    child_pcb->main_thread = NULL;       // 子线程自己设置
+    child_pcb->my_info_as_child = NULL;  
+    child_pcb->main_thread = NULL;       
 
-    // 4. 建立父子关系
+    // 4. construct parent child relationship
     struct child *child = malloc(sizeof *child);
     if (child == NULL) {
         free(child_pcb);
@@ -526,13 +526,13 @@ pid_t process_fork(struct intr_frame *parent_if) {
         return TID_ERROR;
     }
     sema_init(&child->wait_sema, 0);
-    child->pid = -1;          // 暂时未知，等线程创建后赋值
+    child->pid = -1;          // temporary unknow
     child->exit_status = -1;
     child->waited = false;
     child->exited = false;
-    child->child_thread = NULL; // 子线程自己设置
+    child->child_thread = NULL; // set bt child process
 
-    // 5. 构建子线程的辅助数据
+    // 5. set child process helper function
     struct fork_aux *aux = malloc(sizeof *aux);
     if (aux == NULL) {
         free(child);
@@ -544,7 +544,7 @@ pid_t process_fork(struct intr_frame *parent_if) {
     aux->child = child;
     memcpy(&aux->parent_if, parent_if, sizeof *parent_if);
 
-    // 6. 创建子线程
+    // 6. create child thread
     tid_t child_tid = thread_create(parent_pcb->process_name,
                                     PRI_DEFAULT, fork_child, aux);
     if (child_tid == TID_ERROR) {
