@@ -10,7 +10,7 @@
 #include "filesys/filesys.h"
 #include "lib/kernel/console.h"
 
-static struct lock filesys_lock;   // protect file system operation global lock
+struct lock filesys_lock;   // protect file system operation global lock
 
 static void syscall_handler(struct intr_frame*);
 

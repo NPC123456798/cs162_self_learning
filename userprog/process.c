@@ -19,7 +19,7 @@
 #include "threads/synch.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
-
+#include "userprog/syscall.h"
 struct process_load_info {
   char *file_name;            // executable file name
   struct semaphore load_sema; 
@@ -170,6 +170,7 @@ static void start_process(void* info_) {
       new_pcb->files[i] = NULL;
     }
     new_pcb->next_fd = 2; // 0, 1 for std in and out  
+    new_pcb->exec_file = NULL;
   }
 
   // here start analysis the commandline just the file_name
@@ -383,6 +384,27 @@ void process_exit(int status) {
 
 
 
+  lock_acquire(&filesys_lock);
+
+  for (int fd = 2; fd < MAX_FILES; fd++) {
+      if (pcb->files[fd] != NULL) {
+          file_close(pcb->files[fd]);
+          pcb->files[fd] = NULL;
+      }
+  }
+
+  if (pcb->exec_file != NULL) {
+      file_allow_write(pcb->exec_file);
+      file_close(pcb->exec_file);
+      pcb->exec_file = NULL;
+  }  
+
+
+  lock_release(&filesys_lock);
+
+
+
+
 
 
   /* Destroy the current process's page directory and switch back
@@ -535,7 +557,15 @@ pid_t process_fork(struct intr_frame *parent_if) {
         child_pcb->files[i] = parent_pcb->files[i];
     }
     child_pcb->next_fd = parent_pcb->next_fd;
-
+    
+    if (parent_pcb->exec_file != NULL) {
+      child_pcb->exec_file = file_reopen(parent_pcb->exec_file);
+      if (child_pcb->exec_file != NULL) {
+          file_deny_write(child_pcb->exec_file);
+      }
+    } else {
+        child_pcb->exec_file = NULL;
+    }
 
 
 
@@ -784,10 +814,20 @@ bool load(const char* file_name, void (**eip)(void), void** esp) {
   *eip = (void (*)(void))ehdr.e_entry;
 
   success = true;
+  if (success)
+  {
+    file_deny_write(file);
+    t->pcb->exec_file = file;
+  }
+  
+
 
 done:
   /* We arrive here whether the load is successful or not. */
-  file_close(file);
+  if (!success && file != NULL )
+  {
+    file_close(file);
+  }
   return success;
 }
 

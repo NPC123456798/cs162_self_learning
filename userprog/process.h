@@ -39,6 +39,7 @@ struct process {
    /* File descriptor table. */
    struct file *files[MAX_FILES];      
    int next_fd; 
+   struct file *exec_file; 
 };
 
 struct child {
