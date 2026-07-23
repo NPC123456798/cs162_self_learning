@@ -108,20 +108,75 @@ static void syscall_handler(struct intr_frame* f ) {
         unsigned initial_size = (unsigned)args[2];
         
         lock_acquire(&filesys_lock);
-        filesys_create(file, initial_size);
+        bool ok = filesys_create(file, initial_size);
         lock_release(&filesys_lock);
-
+        f->eax = ok;
 
         break;
 
     case SYS_REMOVE:
-        // TODO: implement remove
+        // verify argument file name pointer itself
+        if (!verify_user_range(&args[1], sizeof(char *))) {
+            process_exit(-1);
+            break;
+        }
+        char *file = *(char **)&args[1];
+        // verify file name string 
+        if (!verify_user_string(file)) {
+            process_exit(-1);
+            break;
+        }
+
+        lock_acquire(&filesys_lock);
+        bool ok = filesys_remove(file);
+        lock_release(&filesys_lock);
+
+        f->eax = ok;
+
         break;
 
     case SYS_OPEN:
-        // TODO: implement open
-        break;
+        // verify argument file name pointer itself
+        if (!verify_user_range(&args[1], sizeof(char *))) {
+            process_exit(-1);
+            break;
+        }
+        char *file = *(char **)&args[1];
+        // verify file name string 
+        if (!verify_user_string(file)) {
+            process_exit(-1);
+            break;
+        }
 
+        lock_acquire(&filesys_lock);
+        struct file *f_ptr = filesys_open(file);
+        if (f_ptr == NULL) {
+            lock_release(&filesys_lock);
+            f->eax = -1;
+            break;
+        }
+
+        // allocate file description and jump over 0 and 1
+        struct thread *cur = thread_current();
+        struct process *pcb = cur->pcb;
+        int fd;
+        for (fd = 2; fd < MAX_FILES; fd++) {
+            if (pcb->files[fd] == NULL) {
+                pcb->files[fd] = f_ptr;
+                break;
+            }
+        }
+        lock_release(&filesys_lock);
+
+        if (fd == MAX_FILES) {
+            // if file description table is full then return -1
+            file_close(f_ptr);
+            f->eax = -1;
+        } else {
+            f->eax = fd;
+        }
+        break;
+        
     case SYS_FILESIZE:
         // TODO: implement filesize
         break;
