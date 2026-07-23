@@ -183,7 +183,7 @@ static void syscall_handler(struct intr_frame* f ) {
             }
 
             if (fd == MAX_FILES) {
-                // if file description table is full then return -1
+                // if file description table is full or NULL not find then return -1
                 file_close(f_ptr);
                 f->eax = -1;
             } else {
@@ -245,6 +245,21 @@ static void syscall_handler(struct intr_frame* f ) {
                 break;
             }
             
+            uint32_t *pd = thread_current()->pcb->pagedir;
+
+
+            if (read_size > 0) {
+                uint8_t *buf_start = (uint8_t *) buffer;
+                uint8_t *buf_end   = buf_start + read_size - 1;
+                uint32_t *pd = thread_current()->pcb->pagedir;
+                for (uint8_t *page = pg_round_down(buf_start); page <= buf_end; page += PGSIZE) {
+                    if (!pagedir_is_writable(pd, page)) {
+                        process_exit(-1);
+                        return;  
+                    }
+                }
+            }
+
             struct thread *cur = thread_current();
             struct process *pcb = cur->pcb;
             
