@@ -555,14 +555,14 @@ pid_t process_fork(struct intr_frame *parent_if) {
         return TID_ERROR;
     }
 
-    // 7. 补全 child 信息并挂入父进程链表（需要加锁）
+    // 7. complete child and insert child to parent process children list to construct parent child relationship
     child->pid = child_tid;
     lock_acquire(&child_lock);
     list_push_back(&parent_pcb->children, &child->elem);
     lock_release(&child_lock);
 
-    // 注意：子进程的 my_info_as_child 已在 fork_child 中设置，这里不用再设
-    // 因为子线程可能在锁释放之前就运行并设置，但锁不保护这个指针，可再设置一次以确保，但没必要。
+    // child process my_info_as_child has been set on  fork_child , not again here
+    
 
     return child_tid;
 }
