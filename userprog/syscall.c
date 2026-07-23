@@ -7,10 +7,16 @@
 #include "userprog/process.h"
 #include "userprog/pagedir.h"
 #include "devices/shutdown.h"
+#include "filesys/filesys.h"
+
+static struct lock filesys_lock;   // protect file system operation global lock
 
 static void syscall_handler(struct intr_frame*);
 
-void syscall_init(void) { intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall"); }
+void syscall_init(void) { 
+    intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall");
+    lock_init(&filesys_lock);
+}
 
 static void syscall_handler(struct intr_frame* f ) {
   if (f->esp == NULL || !is_user_vaddr((void*)f->esp)) {
@@ -83,7 +89,29 @@ static void syscall_handler(struct intr_frame* f ) {
         break;
 
     case SYS_CREATE:
-    // TODO: implement create
+        // verify argument file name pointer itself
+        if (!verify_user_range(&args[1], sizeof(char*))) {
+            process_exit(-1);
+            break;
+        }
+        char *file = (char*)args[1];
+        // verify file name string 
+        if (!verify_user_string(file)) {
+            process_exit(-1);
+            break;
+        }
+        // verify initial size argument
+        if (!verify_user_range(&args[2], sizeof(unsigned))) {
+            process_exit(-1);
+            break;
+        }
+        unsigned initial_size = (unsigned)args[2];
+        
+        lock_acquire(&filesys_lock);
+        filesys_create(file, initial_size);
+        lock_release(&filesys_lock);
+
+
         break;
 
     case SYS_REMOVE:
@@ -113,7 +141,7 @@ static void syscall_handler(struct intr_frame* f ) {
     case SYS_TELL:
         // TODO: implement tell
         break;
-        
+
     case SYS_CLOSE:
         // TODO: implement close
         break;
