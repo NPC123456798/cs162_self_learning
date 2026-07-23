@@ -8,6 +8,7 @@
 #include "userprog/pagedir.h"
 #include "devices/shutdown.h"
 #include "filesys/filesys.h"
+#include "lib/kernel/console.h"
 
 static struct lock filesys_lock;   // protect file system operation global lock
 
@@ -180,27 +181,185 @@ static void syscall_handler(struct intr_frame* f ) {
         break;
 
     case SYS_FILESIZE:
-        // TODO: implement filesize
+        // verify fd 
+        if (!verify_user_range(&args[1], sizeof(int))) {
+            process_exit(-1);
+            break;
+        }
+        int fd = args[1];
+        struct thread *cur = thread_current();
+        struct process *pcb = cur->pcb;
+        
+        // check fd validation 
+        if (fd < 0 || fd >= MAX_FILES || pcb->files[fd] == NULL) {
+            f->eax = -1;
+            break;
+        }
+        
+        lock_acquire(&filesys_lock);
+        off_t file_size = file_length(pcb->files[fd]);
+        lock_release(&filesys_lock);
+        f->eax = file_size;
         break;
 
     case SYS_READ:
-        // TODO: implement read
+        // verify fd
+        if (!verify_user_range(&args[1], sizeof(int))) {
+            process_exit(-1);
+            break;
+        }
+        int fd = args[1];
+        // verify buffer pointer
+        if (!verify_user_range(&args[2], sizeof(void *))) {
+            process_exit(-1);
+            break;
+        }
+        void *buffer = *(void **)&args[2];
+        // verify size
+        if (!verify_user_range(&args[3], sizeof(unsigned))) {
+            process_exit(-1);
+            break;
+        }
+        unsigned read_size = args[3];
+        // verify buffer writable (whole block)
+        if (!verify_user_range(buffer, read_size)) {
+            process_exit(-1);
+            break;
+        }
+        
+        struct thread *cur = thread_current();
+        struct process *pcb = cur->pcb;
+        
+        if (fd == STDIN_FILENO) {  // 0
+            // stdin: input with byte one byte
+            int total = 0;
+            uint8_t *buf = (uint8_t *)buffer;
+            for (unsigned i = 0; i < read_size; i++) {
+                int c = input_getc();
+                if (c == -1)
+                    break;
+                buf[i] = (uint8_t)c;
+                total++;
+            }
+            f->eax = total;
+        } else if (fd < 0 || fd >= MAX_FILES || pcb->files[fd] == NULL) {
+            f->eax = -1;
+        } else {
+            lock_acquire(&filesys_lock);
+            off_t bytes = file_read(pcb->files[fd], buffer, (off_t) read_size);
+            lock_release(&filesys_lock);
+            f->eax = bytes;
+        }
         break;
 
     case SYS_WRITE:
-        // TODO: implement write
+         // verify fd
+        if (!verify_user_range(&args[1], sizeof(int))) {
+            process_exit(-1);
+            break;
+        }
+        int fd = args[1];
+        // verify buffer pointer
+        if (!verify_user_range(&args[2], sizeof(void *))) {
+            process_exit(-1);
+            break;
+        }
+        const void *buffer = *(const void **)&args[2];
+        // verify size
+        if (!verify_user_range(&args[3], sizeof(unsigned))) {
+            process_exit(-1);
+            break;
+        }
+        unsigned write_size = args[3];
+        // verify buffer readable (whole block)
+        if (!verify_user_range((void *)buffer, write_size)) {
+            process_exit(-1);
+            break;
+        }
+        
+        struct thread *cur = thread_current();
+        struct process *pcb = cur->pcb;
+        
+        if (fd == STDOUT_FILENO) {  // 1
+            putbuf((const char *)buffer, write_size);
+            f->eax = write_size;
+        } else if (fd < 0 || fd >= MAX_FILES || pcb->files[fd] == NULL) {
+            f->eax = -1;
+        } else {
+            lock_acquire(&filesys_lock);
+            off_t bytes = file_write(pcb->files[fd], buffer, write_size);
+            lock_release(&filesys_lock);
+            f->eax = bytes;
+        }
         break;
 
     case SYS_SEEK:
-        // TODO: implement seek
+        // verify fd
+        if (!verify_user_range(&args[1], sizeof(int))) {
+            process_exit(-1);
+            break;
+        }
+        int fd = args[1];
+        // verify position
+        if (!verify_user_range(&args[2], sizeof(unsigned))) {
+            process_exit(-1);
+            break;
+        }
+        unsigned position = args[2];
+        
+        struct thread *cur = thread_current();
+        struct process *pcb = cur->pcb;
+        
+        if (fd < 0 || fd >= MAX_FILES || pcb->files[fd] == NULL) {
+            // if fd invalid do nothing
+            break;
+        }
+        
+        lock_acquire(&filesys_lock);
+        file_seek(pcb->files[fd], position);
+        lock_release(&filesys_lock);
         break;
 
     case SYS_TELL:
-        // TODO: implement tell
+       // verify fd
+        if (!verify_user_range(&args[1], sizeof(int))) {
+            process_exit(-1);
+            break;
+        }
+        int fd = args[1];
+        struct thread *cur = thread_current();
+        struct process *pcb = cur->pcb;
+        
+        if (fd < 0 || fd >= MAX_FILES || pcb->files[fd] == NULL) {
+            f->eax = -1;  // just return -1
+            break;
+        }
+        
+        lock_acquire(&filesys_lock);
+        off_t pos = file_tell(pcb->files[fd]);
+        lock_release(&filesys_lock);
+        f->eax = pos;
         break;
 
     case SYS_CLOSE:
-        // TODO: implement close
+        // verify fd
+        if (!verify_user_range(&args[1], sizeof(int))) {
+            process_exit(-1);
+            break;
+        }
+        int fd = args[1];
+        struct thread *cur = thread_current();
+        struct process *pcb = cur->pcb;
+        
+        if (fd < 0 || fd >= MAX_FILES || pcb->files[fd] == NULL) {
+            f->eax = -1;  // just return -1 if fd invalid
+            break;
+        }
+        
+        lock_acquire(&filesys_lock);
+        file_close(pcb->files[fd]);
+        pcb->files[fd] = NULL;
+        lock_release(&filesys_lock);
         break;
 
     default:
