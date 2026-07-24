@@ -565,9 +565,40 @@ pid_t process_fork(struct intr_frame *parent_if) {
     list_init(&child_pcb->children);
     child_pcb->my_info_as_child = NULL;  
     child_pcb->main_thread = NULL;       
-    for (int i = 0; i < MAX_FILES; i++) {
-        child_pcb->files[i] = parent_pcb->files[i];
+
+
+
+
+
+    // here is fork's copy from parent to child in file description
+    // must use reopen or parent and child use same struct file in the bottom
+    // will cause open or close reference counter  too much then cause panic
+    // because the deny write never should higher than opened file,
+    // but copy will let child and process all open or close then let counter plus or subtract too much
+    for (int i = 2; i < MAX_FILES; i++) {
+        struct file *f = parent_pcb->files[i];
+        if (f != NULL) {
+            child_pcb->files[i] = file_reopen(f);
+            if (child_pcb->files[i] == NULL) {
+                // release allocated source when go wrong
+                for (int j = 0; j < i; j++) {
+                    if (child_pcb->files[j] != NULL) {
+                        file_close(child_pcb->files[j]);
+                    }
+                }
+                free(child_pcb);
+                pagedir_destroy(child_pagedir);
+                return TID_ERROR;
+            }
+        } else {
+            child_pcb->files[i] = NULL;
+        }
     }
+
+
+
+
+
     child_pcb->next_fd = parent_pcb->next_fd;
     
     if (parent_pcb->exec_file != NULL) {
