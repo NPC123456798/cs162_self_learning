@@ -286,6 +286,7 @@ static void syscall_handler(struct intr_frame* f ) {
                 f->eax = -1;
             } else {
                 lock_acquire(&filesys_lock);
+                // record change for sample.txt
                 off_t bytes = file_read(pcb->files[fd], buffer, (off_t) read_size);
                 lock_release(&filesys_lock);
                 f->eax = bytes;
