@@ -502,8 +502,7 @@ static void fork_child(void *aux_) {
     memcpy(&if_, &aux->parent_if, sizeof if_);
     if_.eax = 0;    // child process return 0
 
-    // free helper struct data which allocated by parent process
-    free(aux);
+    
 
     // goto userspace
     asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
@@ -619,6 +618,12 @@ pid_t process_fork(struct intr_frame *parent_if) {
         pagedir_destroy(child_pagedir);
         return TID_ERROR;
     }
+    // record important problem,always remember parallel is run in any sequence
+    // and here you let child process free aux its insane because
+    // next is accessing for aux's element,and it must will appear free
+    // aux before access it, or parent goto sleep but then see aux was freed and 
+    // and the whole init_sema is freed and then list in it also free, everything
+    // is messy, so you know, who malloc who release or things will be tough
     sema_down(&aux->init_sema); 
 
 
@@ -629,7 +634,7 @@ pid_t process_fork(struct intr_frame *parent_if) {
     lock_release(&child_lock);
 
     // child process my_info_as_child has been set on  fork_child , not again here
-    
+    free(aux);
 
     return child_tid;
 }
