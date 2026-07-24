@@ -60,6 +60,11 @@ void userprog_init(void) {
   list_init(&t->pcb->children);
   t->pcb->my_info_as_child = NULL;
   lock_init(&child_lock);
+  for (int i = 0; i < MAX_FILES; i++) {
+    t->pcb->files[i] = NULL;
+  }
+  t->pcb->next_fd = 2; // 0, 1 for std in and out  
+  t->pcb->exec_file = NULL;
 }
 
 /* Starts a new thread running a user program loaded from
@@ -195,6 +200,9 @@ static void start_process(void* info_) {
     success = load(token, &if_.eip, &if_.esp);
   }
 
+  
+
+
   /* Handle failure with succesful PCB malloc. Must free the PCB */
   if (!success && pcb_success) {
     // Avoid race where PCB is freed before t->pcb is set to NULL
@@ -244,7 +252,7 @@ static void start_process(void* info_) {
   uint8_t *user_stack = (uint8_t *) PHYS_BASE;
   user_stack -= total_size;
   user_stack = (uint8_t *)((uint32_t)user_stack & ~0xF); // because bit operation should be used in int instead of pointer so use type change
-  user_stack -= 4;
+  // user_stack -= 4;
   uint8_t *cur = user_stack;  
   // faked return address
   *(void **)cur = NULL;
