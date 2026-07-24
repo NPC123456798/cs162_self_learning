@@ -56,9 +56,8 @@ static void syscall_handler(struct intr_frame* f ) {
             }
             int status = *(int*)(f->esp + 4);
             f->eax = status;
-            char* save_ptr;
-            char* token = strtok_r(thread_current()->pcb->process_name, " ", &save_ptr);
-            printf("%s: exit(%d)\n", token, status);
+            
+
             process_exit(status);
             break;
         }

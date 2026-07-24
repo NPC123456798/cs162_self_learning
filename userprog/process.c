@@ -252,7 +252,7 @@ static void start_process(void* info_) {
   uint8_t *user_stack = (uint8_t *) PHYS_BASE;
   user_stack -= total_size;
   user_stack = (uint8_t *)((uint32_t)user_stack & ~0xF); // because bit operation should be used in int instead of pointer so use type change
-  // user_stack -= 4;
+  user_stack -= 4;
   uint8_t *cur = user_stack;  
   // faked return address
   *(void **)cur = NULL;
@@ -362,8 +362,10 @@ void process_exit(int status) {
     thread_exit();
     NOT_REACHED();
   }
-
-
+  char* save_ptr;
+  char* token = strtok_r(thread_current()->pcb->process_name, " ", &save_ptr);
+            
+  printf("%s: exit(%d)\n", token, status);
 
 
 
