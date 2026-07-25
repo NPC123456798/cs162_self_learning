@@ -19,7 +19,8 @@ wait-simple wait-twice wait-killed wait-bad-pid multi-recurse           \
 multi-child-fd rox-simple rox-child rox-multichild bad-read bad-write   \
 bad-read2 bad-write2 bad-jump bad-jump2 iloveos practice stack-align-1  \
 stack-align-2 stack-align-3 stack-align-4 stack-align-v \
-fork-simple fork-nested fork-bad fork-tree fork-file fork-fd fork-offset)
+filesize filesize-bad remove-normal \
+fork-simple fork-nested fork-bad fork-tree fork-file fork-fd fork-offset )
 
 tests/userprog_PROGS = $(tests/userprog_TESTS) $(addprefix \
 tests/userprog/,child-simple child-args child-bad child-close child-rox fork-help)
@@ -128,6 +129,16 @@ tests/userprog/fork-tree_SRC = tests/userprog/fork-tree.c
 tests/userprog/fork-file_SRC = tests/userprog/fork-file.c tests/main.c
 tests/userprog/fork-fd_SRC = tests/userprog/fork-fd.c tests/main.c
 tests/userprog/fork-offset_SRC = tests/userprog/fork-offset.c tests/main.c
+
+tests/userprog/filesize_SRC = tests/userprog/filesize.c tests/main.c
+tests/userprog/filesize-bad_SRC = tests/userprog/filesize-bad.c tests/main.c
+
+
+
+tests/userprog/remove-normal_SRC = tests/userprog/remove-normal.c tests/main.c
+
+
+
 
 $(foreach prog,$(tests/userprog_PROGS),$(eval $(prog)_SRC += tests/lib.c))
 
