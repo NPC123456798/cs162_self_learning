@@ -17,7 +17,8 @@ struct lock filesys_lock;   // protect file system operation global lock
 
 static bool verify_user_range(const void *uaddr, size_t size);
 static bool verify_user_string(const char *str);
-
+static int get_user (const uint8_t *uaddr);
+static bool put_user (uint8_t *udst, uint8_t byte);
 
 static void syscall_handler(struct intr_frame*);
 
@@ -438,6 +439,38 @@ static void syscall_handler(struct intr_frame* f ) {
 }
 
 
+
+/* Reads a byte at user virtual address UADDR.
+   UADDR must be below PHYS_BASE.
+   Returns the byte value if successful,
+   -1 if a segfault occurred. */
+static int get_user (const uint8_t *uaddr) {
+    int result;
+    asm ("movl $1f, %0; movzbl %1, %0; 1:"
+    : "=&a" (result) : "m" (*uaddr));
+    return result;
+}
+
+/* Writes BYTE to user address UDST.
+   UDST must be below PHYS_BASE.
+   Returns true if successful,
+   false if a segfault occurred. */
+static bool put_user (uint8_t *udst, uint8_t byte) {
+    int error_code;
+    asm ("movl $1f, %0; movb %b2, %1; 1:"
+    : "=&a" (error_code), "=m" (*udst) : "q" (byte));
+    return error_code != -1;
+}
+
+
+
+
+
+
+
+
+
+
 static bool verify_user_range(const void *uaddr, size_t size) {
     if (size == 0)
     {
@@ -459,35 +492,33 @@ static bool verify_user_range(const void *uaddr, size_t size) {
     uint32_t *pd = thread_current()->pcb->pagedir;
 
     // check start byte if is in the page
-    if (pagedir_get_page(pd, start) == NULL)
+    if (get_user(start) == -1)
         return false;
 
     // check the end byte if is in the page
-    if (pagedir_get_page(pd, end - 1) == NULL)
+    if (get_user(end - 1) == -1)
         return false;
 
     return true;
 }
 
-
 static bool verify_user_string(const char *str) {
     if (!is_user_vaddr(str))
         return false;
-
-    uint32_t *pd = thread_current()->pcb->pagedir;
-
-    while (1) {
-        // check the current str pointer if in mapped page
-        if (pagedir_get_page(pd, str) == NULL)
+    const uint8_t *p = (const uint8_t *)str;
+    while (p < (uint8_t *)PHYS_BASE) {
+        int byte = get_user(p);
+        if (byte == -1)
             return false;
-
-        // seek \0 in current page
-        const char *page_end = (const char *)(((uint32_t)str | PGMASK) + 1); // get the first byte address in next page
-        while (str < page_end) {
-            if (*str == '\0')  // page has been checked so deference is safe
-                return true;
-            str++;
-        }
-        // not find \0 in current page so go to next page
+        if (byte == '\0')
+            return true;
+        p++;
     }
+    return false;   /* across user address can't find end symbol*/
 }
+
+
+
+
+
+
