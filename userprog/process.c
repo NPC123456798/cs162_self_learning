@@ -11,6 +11,7 @@
 #include "filesys/directory.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
+#include "filesys/inode.h"
 #include "threads/flags.h"
 #include "threads/init.h"
 #include "threads/interrupt.h"
@@ -413,7 +414,6 @@ void process_exit(int status) {
   }
 
   if (pcb->exec_file != NULL) {
-      file_allow_write(pcb->exec_file);
       file_close(pcb->exec_file);
       pcb->exec_file = NULL;
   }  
@@ -577,25 +577,13 @@ pid_t process_fork(struct intr_frame *parent_if) {
 
     lock_acquire(&filesys_lock);
     // here is fork's copy from parent to child in file description
-    // must use reopen or parent and child use same struct file in the bottom
-    // will cause open or close reference counter  too much then cause panic
-    // because the deny write never should higher than opened file,
-    // but copy will let child and process all open or close then let counter plus or subtract too much
+    // use file_dup to copy file pointer and add file's ref_cnt and inode's open_cnt
+    // add open cnt to express more file open this inode, add ref_cnt express more process or thread open this file
     for (int i = 2; i < MAX_FILES; i++) {
         struct file *f = parent_pcb->files[i];
         if (f != NULL) {
-            child_pcb->files[i] = file_reopen(f);
-            if (child_pcb->files[i] == NULL) {
-                // release allocated source when go wrong
-                for (int j = 0; j < i; j++) {
-                    if (child_pcb->files[j] != NULL) {
-                        file_close(child_pcb->files[j]);
-                    }
-                }
-                free(child_pcb);
-                pagedir_destroy(child_pagedir);
-                return TID_ERROR;
-            }
+            child_pcb->files[i] = file_dup(f);       // share same struct file pointer and add open_cnt
+                    
         } else {
             child_pcb->files[i] = NULL;
         }
