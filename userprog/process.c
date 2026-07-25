@@ -65,6 +65,10 @@ void userprog_init(void) {
   }
   t->pcb->next_fd = 2; // 0, 1 for std in and out  
   t->pcb->exec_file = NULL;
+
+
+
+
 }
 
 /* Starts a new thread running a user program loaded from
@@ -112,8 +116,8 @@ pid_t process_execute(const char* file_name) {
 
   /* Create a new thread to execute FILE_NAME. */
 
-  
   tid = thread_create(file_name, PRI_DEFAULT, start_process,(void*) info);
+
   if (tid == TID_ERROR)
   {
     free(info->child);
@@ -197,7 +201,9 @@ static void start_process(void* info_) {
     if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
     if_.cs = SEL_UCSEG;
     if_.eflags = FLAG_IF | FLAG_MBS;
+    lock_acquire(&filesys_lock);
     success = load(token, &if_.eip, &if_.esp);
+    lock_release(&filesys_lock);
   }
 
   
@@ -569,7 +575,7 @@ pid_t process_fork(struct intr_frame *parent_if) {
 
 
 
-
+    lock_acquire(&filesys_lock);
     // here is fork's copy from parent to child in file description
     // must use reopen or parent and child use same struct file in the bottom
     // will cause open or close reference counter  too much then cause panic
@@ -610,7 +616,7 @@ pid_t process_fork(struct intr_frame *parent_if) {
         child_pcb->exec_file = NULL;
     }
 
-
+    lock_release(&filesys_lock);
 
     // 4. construct parent child relationship
     struct child *child = malloc(sizeof *child);
@@ -640,8 +646,10 @@ pid_t process_fork(struct intr_frame *parent_if) {
     sema_init(&aux->init_sema, 0);  
 
     // 6. create child thread
+    
     tid_t child_tid = thread_create(parent_pcb->process_name,
                                     PRI_DEFAULT, fork_child, aux);
+  
     if (child_tid == TID_ERROR) {
         free(aux);
         free(child);

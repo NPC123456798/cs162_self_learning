@@ -37,6 +37,9 @@ static struct thread* initial_thread;
 /* Lock used by allocate_tid(). */
 static struct lock tid_lock;
 
+/* Lock used by thread_create(). */
+static struct lock thread_create_lock;
+
 /* Stack frame for kernel_thread(). */
 struct kernel_thread_frame {
   void* eip;             /* Return address. */
@@ -107,6 +110,8 @@ void thread_init(void) {
   ASSERT(intr_get_level() == INTR_OFF);
 
   lock_init(&tid_lock);
+  lock_init(&thread_create_lock);
+
   list_init(&fifo_ready_list);
   list_init(&all_list);
 
@@ -181,7 +186,7 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   tid_t tid;
 
   ASSERT(function != NULL);
-
+  lock_acquire(&thread_create_lock);
   /* Allocate thread. */
   t = palloc_get_page(PAL_ZERO);
   if (t == NULL)
@@ -208,6 +213,7 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
 
   /* Add to run queue. */
   thread_unblock(t);
+  lock_release(&thread_create_lock);
 
   return tid;
 }
