@@ -44,6 +44,7 @@ struct process {
    struct file *exec_file; 
 };
 
+// record my understanding of abstraction for child
 struct child {
    pid_t pid;
    int exit_status;
