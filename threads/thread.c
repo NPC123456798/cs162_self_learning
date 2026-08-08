@@ -24,6 +24,10 @@
    that are ready to run but not actually running. */
 static struct list fifo_ready_list;
 
+
+static struct list prio_ready_list;
+
+
 /* List of all processes.  Processes are added to this list
    when they are first scheduled and removed when they exit. */
 static struct list all_list;
@@ -113,6 +117,7 @@ void thread_init(void) {
   lock_init(&thread_create_lock);
 
   list_init(&fifo_ready_list);
+  list_init(&prio_ready_list);
   list_init(&all_list);
 
   /* Set up a thread structure for the running thread. */
@@ -242,7 +247,22 @@ static void thread_enqueue(struct thread* t) {
 
   if (active_sched_policy == SCHED_FIFO)
     list_push_back(&fifo_ready_list, &t->elem);
-  else
+  else if (active_sched_policy == SCHED_PRIO)
+  {
+    struct list_elem *e;
+    /* find first node whose effective_priority equal or less than t and then insert it into front of e */
+    for (e = list_begin(&prio_ready_list);
+         e != list_end(&prio_ready_list);
+         e = list_next(e)) {
+        struct thread *cur = list_entry(e, struct thread, elem);
+        if (t->effective_priority > cur->effective_priority) {
+            break;   // insert here to promise high priority in the front 
+        }
+        // if priority same loop will continue and finally e will point to next lower priority node 
+        // or go to the end and insert in to end so that fifo in same priority 
+    }
+    list_insert(e, &t->elem);
+  }else
     PANIC("Unimplemented scheduling policy value: %d", active_sched_policy);
 }
 
@@ -334,7 +354,29 @@ void thread_foreach(thread_action_func* func, void* aux) {
 }
 
 /* Sets the current thread's priority to NEW_PRIORITY. */
-void thread_set_priority(int new_priority) { thread_current()->priority = new_priority; }
+void thread_set_priority(int new_priority) { 
+  struct thread *cur = thread_current();
+  int old_effective = cur->effective_priority;
+  
+  cur->priority = new_priority;
+
+
+  if (active_sched_policy == SCHED_PRIO)
+  {
+    cur->effective_priority = new_priority;  // after donation implementation using  max(priority,donation value)
+  
+    
+    if (cur->effective_priority < old_effective) {
+      // effectiveness priority lower then check if need to yield cpu 
+      if (!intr_context() && !list_empty(&prio_ready_list)) {
+        struct thread *front = list_entry(list_front(&prio_ready_list), struct thread, elem);
+        if (front->effective_priority > cur->effective_priority)
+          thread_yield();
+      }
+    }
+  }
+  
+}
 
 /* Returns the current thread's priority. */
 int thread_get_priority(void) { return thread_current()->priority; }
@@ -434,6 +476,7 @@ static void init_thread(struct thread* t, const char* name, int priority) {
   strlcpy(t->name, name, sizeof t->name);
   t->stack = (uint8_t*)t + PGSIZE;
   t->priority = priority;
+  t->effective_priority = priority;
   t->pcb = NULL;
   t->wake_up_tick = 0;
   t->magic = THREAD_MAGIC;
@@ -464,7 +507,10 @@ static struct thread* thread_schedule_fifo(void) {
 
 /* Strict priority scheduler */
 static struct thread* thread_schedule_prio(void) {
-  PANIC("Unimplemented scheduler policy: \"-sched=prio\"");
+  if (!list_empty(&prio_ready_list))
+    return list_entry(list_pop_front(&prio_ready_list), struct thread, elem);
+  else
+    return idle_thread;
 }
 
 /* Fair priority scheduler */
