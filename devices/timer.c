@@ -162,6 +162,8 @@ static void timer_interrupt(struct intr_frame* args UNUSED) {
     if (t->wake_up_tick <= ticks) {
         list_pop_front(&sleep_list);
         thread_unblock(t);
+        if (t->effective_priority > thread_current()->effective_priority)
+          intr_yield_on_return();
     } else {
         break;   // after threads wake up time later than current tick so break 
     }

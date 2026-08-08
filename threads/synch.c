@@ -102,9 +102,47 @@ void sema_up(struct semaphore* sema) {
   ASSERT(sema != NULL);
 
   old_level = intr_disable();
-  if (!list_empty(&sema->waiters))
+
+
+  if (active_sched_policy == SCHED_FIFO)
+  {
+    if (!list_empty(&sema->waiters))
     thread_unblock(list_entry(list_pop_front(&sema->waiters), struct thread, elem));
-  sema->value++;
+    sema->value++;
+  } else if (active_sched_policy == SCHED_PRIO)
+  {
+      if (!list_empty(&sema->waiters)) {
+      /* Find the waiter with the highest effective priority. */
+      struct list_elem *max_elem = list_begin(&sema->waiters);
+      struct thread *max_thread = list_entry(max_elem, struct thread, elem);
+      for (struct list_elem *e = list_next(max_elem);
+            e != list_end(&sema->waiters);
+            e = list_next(e)) 
+      {
+        struct thread *t = list_entry(e, struct thread, elem);
+        if (t->effective_priority > max_thread->effective_priority) {
+            max_elem = e;
+            max_thread = t;
+        }
+      }
+      /* Remove the selected thread from the waiters list and unblock it. */
+      list_remove(max_elem);
+      thread_unblock(max_thread);
+
+      /* Preempt the current thread if the awakened thread has a higher
+        effective priority. */
+      if (!intr_context()) {
+        if (max_thread->effective_priority > thread_current()->effective_priority)
+          thread_yield();
+      } else {
+        if (max_thread->effective_priority > thread_current()->effective_priority)
+          intr_yield_on_return();
+      }
+    }
+    sema->value++;
+  }
+  
+  
   intr_set_level(old_level);
 }
 
@@ -339,9 +377,39 @@ void cond_signal(struct condition* cond, struct lock* lock UNUSED) {
   ASSERT(!intr_context());
   ASSERT(lock_held_by_current_thread(lock));
 
-  if (!list_empty(&cond->waiters))
+  if (active_sched_policy == SCHED_FIFO)
+  {
+    if (!list_empty(&cond->waiters))
     sema_up(&list_entry(list_pop_front(&cond->waiters), struct semaphore_elem, elem)->semaphore);
+  } else if (active_sched_policy == SCHED_PRIO)
+  {
+    if (!list_empty(&cond->waiters)) {
+      /* Find the waiter with the highest effective priority. */
+      struct list_elem *max_elem = list_begin(&cond->waiters);
+      struct semaphore_elem *max_waiter = list_entry(max_elem, struct semaphore_elem, elem);
+      struct thread *max_thread = list_entry(list_front(&max_waiter->semaphore.waiters),
+                                            struct thread, elem);
+      for (struct list_elem *e = list_next(max_elem);
+          e != list_end(&cond->waiters);
+          e = list_next(e)) 
+      {
+        struct semaphore_elem *waiter = list_entry(e, struct semaphore_elem, elem);
+        struct thread *t = list_entry(list_front(&waiter->semaphore.waiters),
+                                      struct thread, elem);
+        if (t->effective_priority > max_thread->effective_priority) {
+          max_elem = e;
+          max_waiter = waiter;
+          max_thread = t;
+        }
+      }
+      list_remove(max_elem);
+      sema_up(&max_waiter->semaphore);
+    }
+  }
 }
+  
+  
+
 
 /* Wakes up all threads, if any, waiting on COND (protected by
    LOCK).  LOCK must be held before calling this function.
