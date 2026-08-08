@@ -98,6 +98,8 @@ struct thread {
   struct process* pcb; /* Process control block if this thread is a userprog */
 #endif
 
+  int64_t wake_up_tick;   /* tick number, wake up when time coming */
+
   /* Owned by thread.c. */
   unsigned magic; /* Detects stack overflow. */
 };

@@ -435,6 +435,7 @@ static void init_thread(struct thread* t, const char* name, int priority) {
   t->stack = (uint8_t*)t + PGSIZE;
   t->priority = priority;
   t->pcb = NULL;
+  t->wake_up_tick = 0;
   t->magic = THREAD_MAGIC;
 
   old_level = intr_disable();

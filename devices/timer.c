@@ -17,6 +17,9 @@
 #error TIMER_FREQ <= 1000 recommended
 #endif
 
+
+static struct list sleep_list;
+
 /* Number of timer ticks since OS booted. */
 static int64_t ticks;
 
@@ -33,6 +36,7 @@ static void real_time_delay(int64_t num, int32_t denom);
 /* Sets up the timer to interrupt TIMER_FREQ times per second,
    and registers the corresponding interrupt. */
 void timer_init(void) {
+  list_init(&sleep_list);
   pit_configure_channel(0, 2, TIMER_FREQ);
   intr_register_ext(0x20, timer_interrupt, "8254 Timer");
 }
@@ -76,11 +80,32 @@ int64_t timer_elapsed(int64_t then) { return timer_ticks() - then; }
 /* Sleeps for approximately TICKS timer ticks.  Interrupts must
    be turned on. */
 void timer_sleep(int64_t ticks) {
+  if (ticks <= 0)
+  {
+    return;
+  }
+  
   int64_t start = timer_ticks();
 
-  ASSERT(intr_get_level() == INTR_ON);
-  while (timer_elapsed(start) < ticks)
-    thread_yield();
+  enum intr_level old_level = intr_disable();
+
+
+  struct thread *cur = thread_current(); 
+  cur->wake_up_tick = timer_ticks() + ticks;
+
+  struct list_elem *e;
+  for (e = list_begin(&sleep_list); e != list_end(&sleep_list); e = list_next(e)) {
+      struct thread *t = list_entry(e, struct thread, elem);
+      if (cur->wake_up_tick < t->wake_up_tick)
+          break;   // find first thread which wakes later than cur and insert cur into front of it 
+  }
+  list_insert(e, &cur->elem);   // insert front of e
+
+
+
+  thread_block();
+
+  intr_set_level(old_level);
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -129,6 +154,18 @@ void timer_print_stats(void) { printf("Timer: %" PRId64 " ticks\n", timer_ticks(
 static void timer_interrupt(struct intr_frame* args UNUSED) {
   ticks++;
   thread_tick();
+
+
+
+  while (!list_empty(&sleep_list)) {
+    struct thread *t = list_entry(list_front(&sleep_list), struct thread, elem);
+    if (t->wake_up_tick <= ticks) {
+        list_pop_front(&sleep_list);
+        thread_unblock(t);
+    } else {
+        break;   // after threads wake up time later than current tick so break 
+    }
+  }
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
