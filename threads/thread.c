@@ -550,6 +550,9 @@ static void schedule(void) {
   ASSERT(cur->status != THREAD_RUNNING);
   ASSERT(is_thread(next));
 
+  // swith_threads will store call it thread's tcb pointer into eax and goto next thread with replacing esp register 
+  // using next thread's stack data, and then return we come to the new thread with the old call switch thread's tcb pointer,
+  // so here call it prev, its right
   if (cur != next)
     prev = switch_threads(cur, next);
   thread_switch_tail(prev);
