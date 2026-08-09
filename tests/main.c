@@ -9,6 +9,7 @@ int main(int argc UNUSED, char* argv[]) {
   random_init(0);
 #ifdef THREADS
   console_init();
+  // here is tests start position
 #endif
   test_main();
   msg("end");

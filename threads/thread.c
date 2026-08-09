@@ -220,6 +220,14 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   thread_unblock(t);
   lock_release(&thread_create_lock);
 
+
+  /* in strict priority schedule, if new thread priority higher, the current thread immediately yield CPU */
+  if (active_sched_policy == SCHED_PRIO) {
+    struct thread *cur = thread_current();
+    if (t->effective_priority > cur->effective_priority)
+      thread_yield();
+  }
+
   return tid;
 }
 
@@ -245,7 +253,7 @@ static void thread_enqueue(struct thread* t) {
   ASSERT(intr_get_level() == INTR_OFF);
   ASSERT(is_thread(t));
 
-  if (active_sched_policy == SCHED_FIFO)
+  if (active_sched_policy == SCHED_FIFO || active_sched_policy == SCHED_DEFAULT)
     list_push_back(&fifo_ready_list, &t->elem);
   else if (active_sched_policy == SCHED_PRIO)
   {
