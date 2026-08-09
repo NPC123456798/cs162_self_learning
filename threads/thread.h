@@ -100,7 +100,8 @@ struct thread {
 #endif
 
   int64_t wake_up_tick;   /* tick number, wake up when time coming */
-
+  struct list held_locks; /* but one thread can hold many locks */
+  struct lock *waiting_lock; /* one thread only can wait one lock */
   /* Owned by thread.c. */
   unsigned magic; /* Detects stack overflow. */
 };
@@ -151,5 +152,8 @@ int thread_get_nice(void);
 void thread_set_nice(int);
 int thread_get_recent_cpu(void);
 int thread_get_load_avg(void);
+
+/* used in priority donation situation it will handle enqueue after change priority  */
+void thread_update_effective_priority(struct thread *t);
 
 #endif /* threads/thread.h */

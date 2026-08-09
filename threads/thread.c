@@ -359,27 +359,37 @@ void thread_set_priority(int new_priority) {
   int old_effective = cur->effective_priority;
   
   cur->priority = new_priority;
-
+  cur->effective_priority = new_priority;
 
   if (active_sched_policy == SCHED_PRIO)
   {
-    cur->effective_priority = new_priority;  // after donation implementation using  max(priority,donation value)
-  
-    
+    enum intr_level old_level = intr_disable();
+
+
+
+    /* compute effective priority again with donation situation and recursive pass  */
+    thread_update_effective_priority(cur);
+
+    /* if effective priority lower then check if need to yield cpu   */
     if (cur->effective_priority < old_effective) {
-      // effectiveness priority lower then check if need to yield cpu 
-      if (!intr_context() && !list_empty(&prio_ready_list)) {
-        struct thread *front = list_entry(list_front(&prio_ready_list), struct thread, elem);
-        if (front->effective_priority > cur->effective_priority)
-          thread_yield();
-      }
+        /* current thread maybe is running but not be the highest priority 
+          * check ready list and if the front is higher then yield
+          */
+        if (!list_empty(&prio_ready_list)) {
+            struct thread *front = list_entry(list_front(&prio_ready_list),
+                                              struct thread, elem);
+            if (front->effective_priority > cur->effective_priority)
+                thread_yield();
+        }
     }
+
+    intr_set_level(old_level);
   }
   
 }
 
 /* Returns the current thread's priority. */
-int thread_get_priority(void) { return thread_current()->priority; }
+int thread_get_priority(void) { return thread_current()->effective_priority; }
 
 /* Sets the current thread's nice value to NICE. */
 void thread_set_nice(int nice UNUSED) { /* Not yet implemented. */
@@ -479,6 +489,9 @@ static void init_thread(struct thread* t, const char* name, int priority) {
   t->effective_priority = priority;
   t->pcb = NULL;
   t->wake_up_tick = 0;
+  list_init(&t->held_locks);
+  t->waiting_lock = NULL;
+  // t->in_priority_update = false;
   t->magic = THREAD_MAGIC;
 
   old_level = intr_disable();
@@ -620,3 +633,47 @@ static tid_t allocate_tid(void) {
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof(struct thread, stack);
+
+
+void thread_update_effective_priority(struct thread *t)  {
+    ASSERT(t != NULL);
+    ASSERT(intr_get_level() == INTR_OFF); // make sure caller have disable interruption 
+
+  
+
+
+    int new_eff = t->priority;  // start from its base priority 
+
+    /* 1. iterate all locks held by t then find highest effectiveness priority in all waiters */
+    for (struct list_elem *e = list_begin(&t->held_locks);
+         e != list_end(&t->held_locks);
+         e = list_next(e)) {
+        struct lock *lock = list_entry(e, struct lock, elem);
+        /* iterare this lock's waiter list  */
+        for (struct list_elem *w = list_begin(&lock->semaphore.waiters);
+             w != list_end(&lock->semaphore.waiters);
+             w = list_next(w)) {
+            struct thread *waiter = list_entry(w, struct thread, elem);
+            if (waiter->effective_priority > new_eff)
+                new_eff = waiter->effective_priority;
+        }
+    }
+
+    /* 2. update t's effectiveness priority  */
+    t->effective_priority = new_eff;
+
+    // if thread is in ready list then should check its position again 
+    if (t->status == THREAD_READY) {
+        list_remove(&t->elem);      // remove form current ready list 
+        thread_enqueue(t);          // use effective_priority to enqueue again
+    }
+
+    /* 3. if t is waiting one lock then recursive update this lock's holder  */
+    if (t->waiting_lock != NULL) {
+        struct thread *holder = t->waiting_lock->holder;
+        if (holder != NULL)
+            thread_update_effective_priority(holder);
+    }
+
+   
+}

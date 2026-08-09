@@ -62,11 +62,29 @@ void sema_down(struct semaphore* sema) {
   ASSERT(!intr_context());
 
   old_level = intr_disable();
-  while (sema->value == 0) {
-    list_push_back(&sema->waiters, &thread_current()->elem);
-    thread_block();
+  if (active_sched_policy == SCHED_FIFO)
+  {
+    while (sema->value == 0) {
+      list_push_back(&sema->waiters, &thread_current()->elem);
+      thread_block();
+    }
+    sema->value--;
+  } else if (active_sched_policy == SCHED_PRIO)
+  {
+    while (sema->value == 0) {
+        list_push_back(&sema->waiters, &thread_current()->elem);
+        // if current thread blocked by lock then use priority donation  
+        if (thread_current()->waiting_lock != NULL) {
+            struct thread *holder = thread_current()->waiting_lock->holder;
+            if (holder != NULL)
+                thread_update_effective_priority(holder);
+        }
+        thread_block();
+    }
+    sema->value--;
   }
-  sema->value--;
+  
+  
   intr_set_level(old_level);
 }
 
@@ -129,17 +147,26 @@ void sema_up(struct semaphore* sema) {
       list_remove(max_elem);
       thread_unblock(max_thread);
 
+      /* here do this for promising sema up operation */
+      sema->value++;
+
       /* Preempt the current thread if the awakened thread has a higher
         effective priority. */
       if (!intr_context()) {
         if (max_thread->effective_priority > thread_current()->effective_priority)
           thread_yield();
       } else {
+        // here because sema up can be called in intr but for priority set needn't because it shouldn't be called in intr
         if (max_thread->effective_priority > thread_current()->effective_priority)
           intr_yield_on_return();
       }
+    } else
+    {
+      /* if no waiter just ++ sema value */
+      sema->value++;
     }
-    sema->value++;
+    
+    
   }
   
   
@@ -196,6 +223,7 @@ void lock_init(struct lock* lock) {
   ASSERT(lock != NULL);
 
   lock->holder = NULL;
+
   sema_init(&lock->semaphore, 1);
 }
 
@@ -212,8 +240,28 @@ void lock_acquire(struct lock* lock) {
   ASSERT(!intr_context());
   ASSERT(!lock_held_by_current_thread(lock));
 
-  sema_down(&lock->semaphore);
-  lock->holder = thread_current();
+  if (active_sched_policy == SCHED_FIFO)
+  {
+    sema_down(&lock->semaphore);
+    lock->holder = thread_current();
+  } else if (active_sched_policy == SCHED_PRIO)
+  {
+     // 1. before blocked set im waiting this lock 
+    //    must before sema_down because thread_block will be called in it 
+    struct thread *cur = thread_current();
+    cur->waiting_lock = lock;
+
+    sema_down(&lock->semaphore);
+
+    // 2. successfully get lock then end wait relationship  
+    cur->waiting_lock = NULL;
+
+    // 3. record hold relationship and then put lock into held_locks list 
+    list_push_back(&cur->held_locks, &lock->elem);
+    lock->holder = cur;
+  }
+  
+  
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -243,8 +291,26 @@ void lock_release(struct lock* lock) {
   ASSERT(lock != NULL);
   ASSERT(lock_held_by_current_thread(lock));
 
-  lock->holder = NULL;
-  sema_up(&lock->semaphore);
+  if (active_sched_policy == SCHED_FIFO)
+  {
+    lock->holder = NULL;
+    sema_up(&lock->semaphore);
+  } else if (active_sched_policy == SCHED_PRIO)
+  {
+    struct thread *cur = thread_current();
+    enum intr_level old_level = intr_disable();  // shut interruption
+    // remove lock from hold list 
+    list_remove(&lock->elem);
+    lock->holder = NULL;
+
+    sema_up(&lock->semaphore);
+
+    thread_set_priority(cur->priority);
+
+    intr_set_level(old_level);
+  }
+  
+  
 }
 
 /* Returns true if the current thread holds LOCK, false
