@@ -386,8 +386,18 @@ void thread_set_priority(int new_priority) {
         if (!list_empty(&prio_ready_list)) {
             struct thread *front = list_entry(list_front(&prio_ready_list),
                                               struct thread, elem);
-            if (front->effective_priority > cur->effective_priority)
-                thread_yield();
+            if (front->effective_priority > cur->effective_priority) {
+                if (!intr_context())
+                {
+                  thread_yield();
+                } else
+                {
+                  intr_yield_on_return();
+                }
+                
+                
+
+            }
         }
     }
 

@@ -307,6 +307,7 @@ void lock_release(struct lock* lock) {
 
     thread_set_priority(cur->priority);
 
+
     intr_set_level(old_level);
   }
   
