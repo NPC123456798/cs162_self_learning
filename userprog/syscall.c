@@ -732,9 +732,49 @@ static void sys_lock_init(struct intr_frame* f, uint32_t* args) {
     f->eax = true;
 }
 
-/*  */
+/* try to acquire lock and check if lock has been held by self or held by other process thread 
+    or haven't been register in lock_init */
 static void sys_lock_acquire(struct intr_frame* f, uint32_t* args) {
 
+    /* check lock_t* argument itself validation */
+    if (!verify_user_range(&args[1], sizeof(char*))) {
+        process_exit(-1);
+    }
+    char* lock_item = args[1];
+
+    /* check lock the char's validation */
+    if (!verify_user_range(lock_item, sizeof(char))) {
+        process_exit(-1);
+    }
+
+    int lock_idx = (int)*lock_item;
+
+
+    /* protect lock table and then check logic  */
+    lock_acquire(&table_lock);
+
+    // check 1: ID if valid and registered  
+    if (lock_idx < 0 || lock_idx >= MAX_USER_LOCKS ||
+        !lock_table[lock_idx].in_use ||
+        lock_table[lock_idx].owner_pid != get_pid(thread_current()->pcb)) {
+        lock_release(&table_lock);
+        f->eax = false;
+        return;
+    }
+
+    // check 2: current thread if hold this lock 
+    struct lock *k_lock = &lock_table[lock_idx].kernel_lock;
+    if (k_lock->holder == thread_current()) {
+        lock_release(&table_lock);
+        f->eax = false;
+        return;
+    }
+
+    lock_release(&table_lock);
+
+    /* safely get lock maybe blocked  */
+    lock_acquire(k_lock);
+    f->eax = true;
 }
 
 /*  */
