@@ -11,6 +11,16 @@
 #include "lib/kernel/console.h"
 #include "devices/input.h"
 
+#define MAX_USER_LOCKS 256
+
+struct user_lock_entry {
+    struct lock kernel_lock;
+    bool in_use;
+    pid_t owner_pid;
+};
+
+static struct user_lock_entry lock_table[MAX_USER_LOCKS];
+static struct lock table_lock;      // protect lock_table's locks
 
 
 struct lock filesys_lock;   // protect file system operation global lock
@@ -50,6 +60,7 @@ static void syscall_handler(struct intr_frame*);
 void syscall_init(void) { 
     intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall");
     lock_init(&filesys_lock);
+    lock_init(&table_lock);
 }
 
 static void syscall_handler(struct intr_frame* f ) {
@@ -256,7 +267,7 @@ static bool put_user (uint8_t *udst, uint8_t byte) {
 
 
 
-
+/* check uaddr valid and check the size of bytes pointed by uaddr if every byte valid  */
 static bool verify_user_range(const void *uaddr, size_t size) {
     if (size == 0)
     {
@@ -288,6 +299,7 @@ static bool verify_user_range(const void *uaddr, size_t size) {
     return true;
 }
 
+/* check str pointer valid and bytes it pointing to validation */
 static bool verify_user_string(const char *str) {
     if (!is_user_vaddr(str))
         return false;
@@ -677,9 +689,47 @@ static void sys_pt_join(struct intr_frame* f, uint32_t* args) {
 
 }
 
-/*  */
+/* init lock in kernel and return the kernel lock's idx for user's lock_t
+    lock_t is a map for user using lock  */
 static void sys_lock_init(struct intr_frame* f, uint32_t* args) {
+    /* check lock_t* argument itself validation */
+    if (!verify_user_range(&args[1], sizeof(char*))) {
+        process_exit(-1);
+    }
+    char* lock_item = args[1];
 
+    /* check lock the char's validation */
+    if (!verify_user_range(lock_item, sizeof(char))) {
+        process_exit(-1);
+    }
+
+    lock_acquire(&table_lock);
+        
+    int idx = -1;
+    for (int i = 0; i < MAX_USER_LOCKS; i++) {
+        if (!lock_table[i].in_use) {
+            idx = i;
+            break;
+        }
+    }
+
+    if (idx == -1) {
+        lock_release(&table_lock);
+        f->eax = false;
+        return;
+    }
+
+    // init kernel lock
+    lock_init(&lock_table[idx].kernel_lock);
+    lock_table[idx].in_use = true;
+    lock_table[idx].owner_pid = get_pid(thread_current()->pcb);
+
+
+    lock_release(&table_lock);
+
+
+    *lock_item = (char)idx;
+    f->eax = true;
 }
 
 /*  */
