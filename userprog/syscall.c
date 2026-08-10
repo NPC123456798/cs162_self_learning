@@ -12,6 +12,7 @@
 #include "devices/input.h"
 
 #define MAX_USER_LOCKS 256
+#define MAX_USER_SEMAS 256
 
 struct user_lock_entry {
     struct lock kernel_lock;
@@ -22,6 +23,13 @@ struct user_lock_entry {
 static struct user_lock_entry lock_table[MAX_USER_LOCKS];
 static struct lock table_lock;      // protect lock_table's locks
 
+struct user_sema_entry {
+    struct semaphore kernel_sema;
+    bool in_use;
+    pid_t owner_pid;
+};
+
+static struct user_sema_entry sema_table[MAX_USER_SEMAS];
 
 struct lock filesys_lock;   // protect file system operation global lock
 
@@ -77,7 +85,7 @@ static void syscall_handler(struct intr_frame* f ) {
 
 
 
-
+/* args for function arguments is from left to right, it means args[1] if leftest argument */
   switch (syscall_no)
   {
     case SYS_HALT:
@@ -829,19 +837,122 @@ static void sys_lock_release(struct intr_frame* f, uint32_t* args) {
 
 }
 
-/*  */
+/* just find free sema in table and then allocate it and return its idx */
 static void sys_sema_init(struct intr_frame* f, uint32_t* args) {
+    if (!verify_user_range(&args[1], sizeof(char*))) {
+        process_exit(-1);
+    }
+    char* u_sema = (char*)args[1];
 
+    // check one byte pointed by u_sema if valid 
+    if (!verify_user_range(u_sema, sizeof(char))) {
+        process_exit(-1);
+    }
+
+
+    if (!verify_user_range(&args[2], sizeof(int))) {
+        process_exit(-1);
+    }
+    int initial_val = (int)args[2];
+
+
+
+    lock_acquire(&table_lock);
+
+    // look for free sema_entry
+    int idx = -1;
+    for (int i = 0; i < MAX_USER_SEMAS; i++) {
+        if (!sema_table[i].in_use) {
+            idx = i;
+            break;
+        }
+    }
+
+    if (idx == -1) {
+        // semaphore table is full 
+        lock_release(&table_lock);
+        f->eax = false;
+        return;
+    }
+
+    // init kernel sema 
+    sema_init(&sema_table[idx].kernel_sema, initial_val);
+    sema_table[idx].in_use = true;
+    sema_table[idx].owner_pid = get_pid(thread_current()->pcb);
+
+    lock_release(&table_lock);
+
+    // write index back to userspace 
+    *u_sema = (char)idx;
+
+    f->eax = true;
 }
 
-/*  */
+/* get arguments and check validation and then check valid for 
+    semaphore in kernel sema table and finally call sema_down */
 static void sys_sema_down(struct intr_frame* f, uint32_t* args) {
 
+    if (!verify_user_range(&args[1], sizeof(char*))) {
+        process_exit(-1);
+    }
+    char* u_sema = (char*)args[1];
+
+    if (!verify_user_range(u_sema, sizeof(char))) {
+        process_exit(-1);
+    }
+
+    int idx = (int)*u_sema;
+
+
+    lock_acquire(&table_lock);
+
+    // check id range, if it is registered and belongs to current process 
+    if (idx < 0 || idx >= MAX_USER_SEMAS ||
+        !sema_table[idx].in_use ||
+        sema_table[idx].owner_pid != get_pid(thread_current()->pcb)) {
+        lock_release(&table_lock);
+        f->eax = false;
+        return;
+    }
+
+    // must release here because sema_down maybe block 
+    lock_release(&table_lock);
+
+
+    sema_down(&sema_table[idx].kernel_sema);
+    f->eax = true;
 }
 
-/*  */
+/* check arguments and then check validation of semaphore and finally call sema_up */
 static void sys_sema_up(struct intr_frame* f, uint32_t* args) {
 
+    if (!verify_user_range(&args[1], sizeof(char*))) {
+        process_exit(-1);
+    }
+    char* u_sema = (char*)args[1];
+
+    if (!verify_user_range(u_sema, sizeof(char))) {
+        process_exit(-1);
+    }
+
+    int idx = (int)*u_sema;
+
+    
+    lock_acquire(&table_lock);
+
+    if (idx < 0 || idx >= MAX_USER_SEMAS ||
+        !sema_table[idx].in_use ||
+        sema_table[idx].owner_pid != get_pid(thread_current()->pcb)) {
+        lock_release(&table_lock);
+        f->eax = false;
+        return;
+    }
+
+    lock_release(&table_lock);
+
+    
+    sema_up(&sema_table[idx].kernel_sema);
+    f->eax = true;
 }
 
 /*  */
