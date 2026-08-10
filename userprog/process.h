@@ -38,6 +38,15 @@ struct process {
    struct list children;
    struct child *my_info_as_child; // it points to parent process' child process which is this current process in parent process' children list
 
+   /* used by user multithread */
+   struct list child_threads;          // all active child threads 
+   int active_threads;                 // current active threads number (include main thread) 
+   bool main_exited;                   // main thread if call pthread_exit  
+   struct list exited_threads;
+   struct semaphore thread_exit_sema;    // main thread wait child threads exit 
+   struct lock thread_list_lock;         // protect upon lists 
+
+
    /* File descriptor table. */
    struct file *files[MAX_FILES];      
    int next_fd; 

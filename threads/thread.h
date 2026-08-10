@@ -98,12 +98,22 @@ struct thread {
   /* Owned by process.c. */
   struct process* pcb; /* Process control block if this thread is a userprog */
 #endif
+  /* used in user multithread  */
+  struct semaphore exit_sema; // used in join wait 
+  bool has_been_joined;       // if has been joined  
 
   int64_t wake_up_tick;   /* tick number, wake up when time coming */
   struct list held_locks; /* but one thread can hold many locks */
   struct lock *waiting_lock; /* one thread only can wait one lock */
   /* Owned by thread.c. */
   unsigned magic; /* Detects stack overflow. */
+};
+
+
+struct thread_exit_info {
+    tid_t tid;                  // exited thread's tid 
+    bool has_been_joined; 
+    struct list_elem elem;      // hang on pcb->exited_threads list
 };
 
 /* Types of scheduler that the user can request the kernel

@@ -955,9 +955,10 @@ static void sys_sema_up(struct intr_frame* f, uint32_t* args) {
     f->eax = true;
 }
 
-/*  */
+/* get tid from current user thread's corresponding kernel thread */
 static void sys_get_tid(struct intr_frame* f, uint32_t* args) {
-
+    f->eax = thread_current()->tid;
+    return;
 }
 
 

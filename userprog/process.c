@@ -64,6 +64,16 @@ void userprog_init(void) {
   for (int i = 0; i < MAX_FILES; i++) {
     t->pcb->files[i] = NULL;
   }
+
+  /* user multithread relative init */
+  list_init(&t->pcb->child_threads);
+  t->pcb->active_threads = 0;
+  t->pcb->main_exited = false;
+  list_init(&t->pcb->exited_threads);
+  sema_init(&t->pcb->thread_exit_sema, 0);
+  lock_init(&t->pcb->thread_list_lock);
+
+
   t->pcb->next_fd = 2; // 0, 1 for std in and out  
   t->pcb->exec_file = NULL;
 
@@ -177,6 +187,13 @@ static void start_process(void* info_) {
     list_init(&t->pcb->children);
     t->pcb->my_info_as_child = NULL;
 
+    /* user multithread relative init */
+    list_init(&t->pcb->child_threads);
+    t->pcb->active_threads = 1;
+    t->pcb->main_exited = false;
+    list_init(&t->pcb->exited_threads);
+    sema_init(&t->pcb->thread_exit_sema, 0);
+    lock_init(&t->pcb->thread_list_lock);
 
     // add init for file description table
     for (int i = 0; i < MAX_FILES; i++) {
@@ -544,7 +561,7 @@ static bool copy_page_table(uint32_t *dst_pd, uint32_t *src_pd) {
 
 
 pid_t process_fork(struct intr_frame *parent_if) {
-   struct thread *cur = thread_current();
+    struct thread *cur = thread_current();
     struct process *parent_pcb = cur->pcb;
 
     // 1. create child process page directory
@@ -572,6 +589,13 @@ pid_t process_fork(struct intr_frame *parent_if) {
     child_pcb->my_info_as_child = NULL;  
     child_pcb->main_thread = NULL;       
 
+    /* user multithread init part */
+    list_init(&child_pcb->child_threads);
+    child_pcb->active_threads = 1;
+    child_pcb->main_exited = false;
+    list_init(&child_pcb->exited_threads);
+    sema_init(&child_pcb->thread_exit_sema, 0);
+    lock_init(&child_pcb->thread_list_lock);
 
 
 

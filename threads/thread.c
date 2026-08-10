@@ -506,10 +506,14 @@ static void init_thread(struct thread* t, const char* name, int priority) {
   t->priority = priority;
   t->effective_priority = priority;
   t->pcb = NULL;
+
+  sema_init(&t->exit_sema, 0);
+  t->has_been_joined = false;
+
   t->wake_up_tick = 0;
   list_init(&t->held_locks);
   t->waiting_lock = NULL;
-  // t->in_priority_update = false;
+
   t->magic = THREAD_MAGIC;
 
   old_level = intr_disable();
