@@ -33,6 +33,17 @@ static void sys_write(struct intr_frame* f, uint32_t* args);
 static void sys_seek(struct intr_frame* f, uint32_t* args);
 static void sys_tell(struct intr_frame* f, uint32_t* args);
 static void sys_close(struct intr_frame* f, uint32_t* args);
+static void sys_pt_create(struct intr_frame* f, uint32_t* args);
+static void sys_pt_exit(struct intr_frame* f, uint32_t* args);
+static void sys_pt_join(struct intr_frame* f, uint32_t* args);
+static void sys_lock_init(struct intr_frame* f, uint32_t* args);
+static void sys_lock_acquire(struct intr_frame* f, uint32_t* args);
+static void sys_lock_release(struct intr_frame* f, uint32_t* args);
+static void sys_sema_init(struct intr_frame* f, uint32_t* args);
+static void sys_sema_down(struct intr_frame* f, uint32_t* args);
+static void sys_sema_up(struct intr_frame* f, uint32_t* args);
+static void sys_get_tid(struct intr_frame* f, uint32_t* args);
+
 
 static void syscall_handler(struct intr_frame*);
 
@@ -124,7 +135,66 @@ static void syscall_handler(struct intr_frame* f ) {
 
     case SYS_CLOSE:
         sys_close(f, args);
-        break;    
+        break;
+
+    case SYS_PT_CREATE:
+        sys_pt_create(f,args);
+        break;
+
+    case SYS_PT_EXIT:
+        sys_pt_exit(f,args);
+        break;
+
+    case SYS_PT_JOIN:
+        sys_pt_join(f,args);
+        break;
+
+
+    case SYS_LOCK_INIT:
+        sys_lock_init(f,args);
+        break;
+
+
+
+    case SYS_LOCK_ACQUIRE:
+        sys_lock_acquire(f,args);
+        break;
+
+
+
+
+    case SYS_LOCK_RELEASE:
+        sys_lock_release(f,args);
+        break;
+
+
+
+
+    case SYS_SEMA_INIT:
+        sys_sema_init(f,args);
+        break;
+
+
+
+    case SYS_SEMA_DOWN:
+        sys_sema_down(f,args);
+        break;
+
+
+
+    case SYS_SEMA_UP:
+        sys_sema_up(f,args);
+        break;
+
+
+
+
+    case SYS_GET_TID:
+        sys_get_tid(f,args);
+        break;
+
+
+
 
 
     default:
@@ -581,3 +651,69 @@ static void sys_close(struct intr_frame* f, uint32_t* args) {
     pcb->files[fd] = NULL;
     lock_release(&filesys_lock);
 }
+
+
+
+
+
+
+
+
+
+
+
+/*  */
+static void sys_pt_create(struct intr_frame* f, uint32_t* args) {
+
+}
+
+/*  */
+static void sys_pt_exit(struct intr_frame* f, uint32_t* args) {
+
+}
+
+/*  */
+static void sys_pt_join(struct intr_frame* f, uint32_t* args) {
+
+}
+
+/*  */
+static void sys_lock_init(struct intr_frame* f, uint32_t* args) {
+
+}
+
+/*  */
+static void sys_lock_acquire(struct intr_frame* f, uint32_t* args) {
+
+}
+
+/*  */
+static void sys_lock_release(struct intr_frame* f, uint32_t* args) {
+
+}
+
+/*  */
+static void sys_sema_init(struct intr_frame* f, uint32_t* args) {
+
+}
+
+/*  */
+static void sys_sema_down(struct intr_frame* f, uint32_t* args) {
+
+}
+
+/*  */
+static void sys_sema_up(struct intr_frame* f, uint32_t* args) {
+
+}
+
+/*  */
+static void sys_get_tid(struct intr_frame* f, uint32_t* args) {
+
+}
+
+
+
+
+
+
