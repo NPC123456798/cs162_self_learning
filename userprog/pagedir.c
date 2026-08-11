@@ -223,6 +223,7 @@ void pagedir_set_accessed(uint32_t* pd, const void* vpage, bool accessed) {
 /* Loads page directory PD into the CPU's page directory base
    register. */
 void pagedir_activate(uint32_t* pd) {
+
   if (pd == NULL)
     pd = init_page_dir;
 

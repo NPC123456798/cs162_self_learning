@@ -103,6 +103,7 @@ struct thread {
   bool has_been_joined;       // if has been joined  
   struct list_elem thread_elem; // hang on parent process active threads list
   void *user_stack_page;
+  bool exit_cleaned;
 
   int64_t wake_up_tick;   /* tick number, wake up when time coming */
   struct list held_locks; /* but one thread can hold many locks */

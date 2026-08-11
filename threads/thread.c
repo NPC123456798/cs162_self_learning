@@ -510,6 +510,7 @@ static void init_thread(struct thread* t, const char* name, int priority) {
   sema_init(&t->exit_sema, 0);
   t->has_been_joined = false;
   t->user_stack_page = NULL;
+  t->exit_cleaned = false;
 
   t->wake_up_tick = 0;
   list_init(&t->held_locks);
@@ -603,6 +604,8 @@ void thread_switch_tail(struct thread* prev) {
 
 #ifdef USERPROG
   /* Activate the new address space. */
+  // at thread create stage, this function will update cr3 init_page_dir reason is down
+  // so every new thread's cr3's value is init_page_dir instead of pcb's pagedir
   process_activate();
 #endif
 
@@ -615,6 +618,44 @@ void thread_switch_tail(struct thread* prev) {
     ASSERT(prev != cur);
     palloc_free_page(prev);
   }
+  
+  /* here for thread create,because pcb is malloc or assigned in thread's function
+    so when use thread_create function and new thread scheduled its pcb is NULL before
+    it execute its thread function.    
+  */
+  if (cur->pcb == NULL)
+  {
+    return;
+  }
+  
+
+  if (cur->pcb->exit_in_progress && !cur->exit_cleaned)
+  {
+     // mark cleaned avoid coming here again 
+    cur->exit_cleaned = true;
+
+    // 1. release current thread's all kernel or user lock 
+    while (!list_empty(&cur->held_locks)) {
+        struct lock *l = list_entry(list_pop_front(&cur->held_locks), struct lock, elem);
+        // make sure self is the holdder
+        if (l->holder == cur)
+            lock_release(l);
+    }
+
+    // 2. decrement count, don't remove from the active thread list just child_list because all elem is in kernel thread 
+    // struct so thread exit will recycle it naturally, process_exit's iteration won't iterate again so don't worry
+    struct process *pcb = cur->pcb;
+    lock_acquire(&pcb->thread_list_lock);   // protect counter 
+    pcb->active_threads--;
+    lock_release(&pcb->thread_list_lock);
+
+    // ! TODO: here is a big bug for main thread sema down too situation,need to fix in the future
+    sema_up(&pcb->thread_exit_sema);
+
+
+    thread_exit();
+  }
+  
 }
 
 /* Schedules a new thread.  At entry, interrupts must be off and

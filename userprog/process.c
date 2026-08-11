@@ -80,7 +80,7 @@ void userprog_init(void) {
 
   /* user multithread relative init */
   
-  t->pcb->active_threads = 0;
+  t->pcb->active_threads = 1;
   t->pcb->main_exited = false;
   list_init(&t->pcb->child_threads);
   list_init(&t->pcb->exited_threads);
@@ -213,6 +213,8 @@ static void start_process(void* info_) {
     sema_init(&t->pcb->thread_exit_sema, 0);
     lock_init(&t->pcb->thread_list_lock);
     t->pcb->next_stack_bottom = (void *)(((uint8_t*)PHYS_BASE) - 2 * PGSIZE);
+    t->pcb->exit_in_progress = false;
+    t->pcb->exit_code = -1;
 
     // add init for file description table
     for (int i = 0; i < MAX_FILES; i++) {
@@ -407,6 +409,7 @@ void process_exit(int status) {
     thread_exit();
     NOT_REACHED();
   }
+  struct process *pcb = cur->pcb;
   char* save_ptr;
   char* token = strtok_r(thread_current()->pcb->process_name, " ", &save_ptr);
             
@@ -414,10 +417,42 @@ void process_exit(int status) {
 
 
 
+  enum intr_level old_level = intr_disable();
+
+
+ /* 1. set process exit flag and exit code   */
+  pcb->exit_code = status;
+  pcb->exit_in_progress = true;
+
+  cur->exit_cleaned = true;
+  intr_set_level(old_level);
+
+
+
+/* 2. force waking up process's all blocked thread  */
+  lock_acquire(&pcb->thread_list_lock);
+  struct list_elem *e;
+  for (e = list_begin(&pcb->child_threads); e != list_end(&pcb->child_threads); e = list_next(e)) {
+      struct thread *t = list_entry(e, struct thread, thread_elem);
+      if (t != cur && t->status == THREAD_BLOCKED)
+          thread_unblock(t);
+  }
+  /* record need to wait other threads' number (current active_threads include self )   */
+  int to_wait = pcb->active_threads - 1;
+  lock_release(&pcb->thread_list_lock);
+
+  /* 4. wait other threads all exit (use semaphore) */
+  while (to_wait-- > 0)
+      sema_down(&pcb->thread_exit_sema);
+
+
+
+
+
+
 
   lock_acquire(&child_lock);
 
-  struct process *pcb = cur->pcb;
   if ( pcb->my_info_as_child != NULL) {
         struct child *child = pcb->my_info_as_child;
         child->exit_status = status;   // save exit status
@@ -439,6 +474,8 @@ void process_exit(int status) {
 
 
   lock_release(&child_lock);
+
+
 
 
 
@@ -480,7 +517,6 @@ void process_exit(int status) {
     pagedir_destroy(pd);
   }
 
-
   /* Free the PCB of this process and kill this thread
      Avoid race where PCB is freed before t->pcb is set to NULL
      If this happens, then an unfortuantely timed timer interrupt
@@ -496,13 +532,21 @@ void process_exit(int status) {
 /* Sets up the CPU for running user code in the current
    thread. This function is called on every context switch. */
 void process_activate(void) {
+  static uint32_t *last_pagedir = NULL;   // last time activated page dir 
   struct thread* t = thread_current();
 
   /* Activate thread's page tables. */
-  if (t->pcb != NULL && t->pcb->pagedir != NULL)
-    pagedir_activate(t->pcb->pagedir);
-  else
-    pagedir_activate(NULL);
+  if (t->pcb != NULL && t->pcb->pagedir != NULL){
+    // this is a optimization for switch in same process multi user threads
+        if (t->pcb->pagedir != last_pagedir) {
+            pagedir_activate(t->pcb->pagedir);
+            last_pagedir = t->pcb->pagedir;
+        }
+        // same process don't reload cr3 to keep tlb    
+    } else {
+        pagedir_activate(NULL);
+        last_pagedir = NULL;
+    }
 
   /* Set thread's kernel stack for use in processing interrupts.
      This does nothing if this is not a user process. */
@@ -618,6 +662,8 @@ pid_t process_fork(struct intr_frame *parent_if) {
     sema_init(&child_pcb->thread_exit_sema, 0);
     lock_init(&child_pcb->thread_list_lock);
     child_pcb->next_stack_bottom = parent_pcb->next_stack_bottom; 
+    child_pcb->exit_in_progress = false;
+    child_pcb->exit_code = -1;
 
 
     lock_acquire(&filesys_lock);
@@ -1065,6 +1111,9 @@ bool is_main_thread(struct thread* t, struct process* p) { return p->main_thread
 /* Gets the PID of a process */
 pid_t get_pid(struct process* p) { return (pid_t)p->main_thread->tid; }
 
+static inline void invlpg(void *addr) {
+    asm volatile("invlpg (%0)" : : "r"(addr) : "memory");
+}
 /* Creates a new stack for the thread and sets up its arguments.
    Stores the thread's entry point into *EIP and its initial stack
    pointer into *ESP. Handles all cleanup if unsuccessful. Returns
@@ -1093,8 +1142,7 @@ bool setup_thread(stub_fun sfun, pthread_fun tfun, void *arg,
         palloc_free_page(kpage);
         return false;
     }
- 
-
+// must refresh tlb, or the creator thread's entrys on tlb will cover the access for new created thread's virtual address access
     // 4. record current thread's user stack base address used in thread exit to free 
     thread_current()->user_stack_page = stack_bottom;  // user_stack_page still need to be in  struct thread 
 
@@ -1114,6 +1162,7 @@ bool setup_thread(stub_fun sfun, pthread_fun tfun, void *arg,
     // 6. set entry and user stack pointer (user virtual address) 
     *eip = sfun;
     *esp = (void *)((uint8_t *) stack_bottom + offset);  // esp point to fake return address position 
+invlpg(kpage);
 
     return true;
 }
@@ -1128,13 +1177,16 @@ bool setup_thread(stub_fun sfun, pthread_fun tfun, void *arg,
    should be similar to process_execute (). For now, it does nothing.
    */
 tid_t pthread_execute(stub_fun sf , pthread_fun tf , void* arg ) {
-struct pthread_create_info *info = malloc(sizeof *info);
+
+    struct pthread_create_info *info = malloc(sizeof *info);
     if (info == NULL) return TID_ERROR;
 
     info->sfun = sf;
     info->tfun = tf;
     info->arg  = arg;
-    info->pcb  = thread_current()->pcb;   // ´«µÝ PCB
+    info->pcb  = thread_current()->pcb;   // pass PCB
+
+
     sema_init(&info->load_sema, 0);
     info->success = false;
     info->child_tid = TID_ERROR;
@@ -1168,16 +1220,19 @@ static void start_pthread(void* exec_ ) {
   struct pthread_create_info *info = exec_;
     struct thread *t = thread_current();
     struct process *pcb = info->pcb;
-// printf("start_pthread: pcb=%p, lock=%p, child_threads head=%p\n", pcb, &pcb->thread_list_lock, &pcb->child_threads);
+    pagedir_activate(pcb->pagedir); 
+
     // set process control block 
     t->pcb = pcb;
 
     //  call setup_thread to finish user stack allocation and init  
     void (*eip)(void);
     void *esp;
+
     
     if (!setup_thread(info->sfun, info->tfun, info->arg, pcb, &eip, &esp))
         goto fail;
+
 
     // construct interruption stack frame 
     struct intr_frame if_;
@@ -1194,16 +1249,20 @@ static void start_pthread(void* exec_ ) {
     pcb->active_threads++;
     lock_release(&pcb->thread_list_lock);
 
+
     // nootify parent thread 
     info->child_tid = t->tid;
     info->success = true;
     sema_up(&info->load_sema);
+
 
     // jump to user state  
     asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
     NOT_REACHED();
 
 fail:
+
+
     info->success = false;
     sema_up(&info->load_sema);
     thread_exit();
@@ -1228,6 +1287,7 @@ tid_t pthread_join(tid_t tid UNUSED) { return -1; }
    This function will be implemented in Project 2: Multithreading. For
    now, it does nothing. */
 void pthread_exit(void) {
+
    struct thread *cur = thread_current();
     struct process *pcb = cur->pcb;
     ASSERT(pcb != NULL);
