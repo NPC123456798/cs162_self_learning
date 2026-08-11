@@ -33,12 +33,25 @@ struct process_load_info {
 };
 
 
+struct pthread_create_info {
+    stub_fun sfun;               // stub function pointer 
+    pthread_fun tfun;            // user thread function pointer 
+    void *arg;                   // user args 
+    struct process *pcb;          // parent process PCB
+    struct semaphore load_sema;  // parent thread wait child thread init finished 
+    tid_t child_tid;             // child thread TID
+    bool success;                // child thread init success flag 
+};
+
+
 
 static struct lock child_lock;
 static thread_func start_process NO_RETURN;
 static thread_func start_pthread NO_RETURN;
 static bool load(const char* file_name, void (**eip)(void), void** esp);
-bool setup_thread(void (**eip)(void), void** esp);
+bool setup_thread(stub_fun sfun, pthread_fun tfun, void *arg,
+                  struct process *pcb,
+                  void (**eip)(void), void **esp);
 
 /* Initializes user programs in the system by ensuring the main
    thread has a minimal PCB so that it can execute and wait for
@@ -155,7 +168,10 @@ pid_t process_execute(const char* file_name) {
   } else {
     free(info->child);
   }
+  // ! here i forget why do it, maybe its unnecessary, but i think i just don't change it now
   sema_up(&info->load_sema);
+
+  
   free(info);   
   return result;
 }
@@ -194,6 +210,7 @@ static void start_process(void* info_) {
     list_init(&t->pcb->exited_threads);
     sema_init(&t->pcb->thread_exit_sema, 0);
     lock_init(&t->pcb->thread_list_lock);
+    t->pcb->next_stack_bottom = (void *)(((uint8_t*)PHYS_BASE) - 2 * PGSIZE);
 
     // add init for file description table
     for (int i = 0; i < MAX_FILES; i++) {
@@ -222,6 +239,8 @@ static void start_process(void* info_) {
     lock_acquire(&filesys_lock);
     success = load(token, &if_.eip, &if_.esp);
     lock_release(&filesys_lock);
+    // here is decided by setup_stack
+    t->user_stack_page = ((uint8_t*)PHYS_BASE) - PGSIZE;
   }
 
   
@@ -596,7 +615,7 @@ pid_t process_fork(struct intr_frame *parent_if) {
     list_init(&child_pcb->exited_threads);
     sema_init(&child_pcb->thread_exit_sema, 0);
     lock_init(&child_pcb->thread_list_lock);
-
+    child_pcb->next_stack_bottom = parent_pcb->next_stack_bottom; 
 
 
     lock_acquire(&filesys_lock);
@@ -1016,8 +1035,6 @@ static bool setup_stack(void** esp) {
       palloc_free_page(kpage);
   }
 
-  // TODO: add the argv and the argc and the NULL return address and some NULL sentinel
-  // TODO: this function now only put correct value to  the esp  but others are less.
 
   return success;
 }
@@ -1054,7 +1071,44 @@ pid_t get_pid(struct process* p) { return (pid_t)p->main_thread->tid; }
    This function will be implemented in Project 2: Multithreading. For
    now, it does nothing. You may find it necessary to change the
    function signature. */
-bool setup_thread(void (**eip)(void) UNUSED, void** esp UNUSED) { return false; }
+bool setup_thread(stub_fun sfun, pthread_fun tfun, void *arg,
+                  struct process *pcb,
+                  void (**eip)(void), void **esp)
+{
+    // 1. allocate one physical memory as user stack 
+    void *kpage = palloc_get_page(PAL_USER | PAL_ZERO);
+    if (kpage == NULL)
+        return false;
+
+    // 2. allocate stack page in parent process user virtual space  
+    lock_acquire(&pcb->thread_list_lock);
+    void *stack_bottom = pcb->next_stack_bottom;
+    pcb->next_stack_bottom -= PGSIZE;
+    lock_release(&pcb->thread_list_lock);
+
+    // 3. map physic page into selected user virtual address 
+    if (!install_page(stack_bottom, kpage, true)) {
+        palloc_free_page(kpage);
+        return false;
+    }
+
+    // 4. record current thread's user stack base address used in thread exit to free 
+    thread_current()->user_stack_page = stack_bottom;  // user_stack_page still need to be in  struct thread 
+
+    // 5. in user stack push arguments as cdecl call convention   
+    void *stack_top = stack_bottom + PGSIZE;
+    uint32_t *sp = (uint32_t *) stack_top;
+
+    *(--sp) = (uint32_t) arg;       // second argument 
+    *(--sp) = (uint32_t) tfun;      // first argument 
+    *(--sp) = 0;                    // fake return address 
+
+    // 6. set code entry and stack pointer 
+    *eip = sfun;
+    *esp = (void *) sp;
+
+    return true;
+}
 
 /* Starts a new thread with a new user stack running SF, which takes
    TF and ARG as arguments on its user stack. This new thread may be
@@ -1065,7 +1119,36 @@ bool setup_thread(void (**eip)(void) UNUSED, void** esp UNUSED) { return false; 
    This function will be implemented in Project 2: Multithreading and
    should be similar to process_execute (). For now, it does nothing.
    */
-tid_t pthread_execute(stub_fun sf UNUSED, pthread_fun tf UNUSED, void* arg UNUSED) { return -1; }
+tid_t pthread_execute(stub_fun sf , pthread_fun tf , void* arg ) {
+struct pthread_create_info *info = malloc(sizeof *info);
+    if (info == NULL) return TID_ERROR;
+
+    info->sfun = sf;
+    info->tfun = tf;
+    info->arg  = arg;
+    info->pcb  = thread_current()->pcb;   // ´«µÝ PCB
+    sema_init(&info->load_sema, 0);
+    info->success = false;
+    info->child_tid = TID_ERROR;
+
+    tid_t tid = thread_create("uthread", PRI_DEFAULT, start_pthread, info);
+    if (tid == TID_ERROR) {
+        free(info);
+        return TID_ERROR;
+    }
+
+    sema_down(&info->load_sema);         // wait child thread init 
+
+    if (!info->success) {
+        free(info);
+        return TID_ERROR;
+    }
+
+    tid_t child_tid = info->child_tid;
+    free(info);                          // child thread doesn't need info anymore 
+    return child_tid;
+
+}
 
 /* A thread function that creates a new user thread and starts it
    running. Responsible for adding itself to the list of threads in
@@ -1073,7 +1156,49 @@ tid_t pthread_execute(stub_fun sf UNUSED, pthread_fun tf UNUSED, void* arg UNUSE
 
    This function will be implemented in Project 2: Multithreading and
    should be similar to start_process (). For now, it does nothing. */
-static void start_pthread(void* exec_ UNUSED) {}
+static void start_pthread(void* exec_ ) {
+  struct pthread_create_info *info = exec_;
+    struct thread *t = thread_current();
+    struct process *pcb = info->pcb;
+
+    // set process control block 
+    t->pcb = pcb;
+
+    //  call setup_thread to finish user stack allocation and init  
+    void (*eip)(void);
+    void *esp;
+    if (!setup_thread(info->sfun, info->tfun, info->arg, pcb, &eip, &esp))
+        goto fail;
+
+    // construct interruption stack frame 
+    struct intr_frame if_;
+    memset(&if_, 0, sizeof if_);
+    if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
+    if_.cs = SEL_UCSEG;
+    if_.eflags = FLAG_IF | FLAG_MBS;
+    if_.eip = eip;
+    if_.esp = esp;
+
+    // hang thread into process active thread list 
+    lock_acquire(&pcb->thread_list_lock);
+    list_push_back(&pcb->child_threads, &t->thread_elem);
+    pcb->active_threads++;
+    lock_release(&pcb->thread_list_lock);
+
+    // nootify parent thread 
+    info->child_tid = t->tid;
+    info->success = true;
+    sema_up(&info->load_sema);
+
+    // jump to user state  
+    asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
+    NOT_REACHED();
+
+fail:
+    info->success = false;
+    sema_up(&info->load_sema);
+    thread_exit();
+}
 
 /* Waits for thread with TID to die, if that thread was spawned
    in the same process and has not been waited on yet. Returns TID on

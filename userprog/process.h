@@ -45,7 +45,7 @@ struct process {
    struct list exited_threads;
    struct semaphore thread_exit_sema;    // main thread wait child threads exit 
    struct lock thread_list_lock;         // protect upon lists 
-
+   void *next_stack_bottom;  // next user thread stack's user space virtual base address 
 
    /* File descriptor table. */
    struct file *files[MAX_FILES];      

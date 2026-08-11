@@ -101,6 +101,8 @@ struct thread {
   /* used in user multithread  */
   struct semaphore exit_sema; // used in join wait 
   bool has_been_joined;       // if has been joined  
+  struct list_elem thread_elem; // hang on parent process active threads list
+  void *user_stack_page;
 
   int64_t wake_up_tick;   /* tick number, wake up when time coming */
   struct list held_locks; /* but one thread can hold many locks */

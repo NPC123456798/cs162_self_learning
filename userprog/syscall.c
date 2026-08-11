@@ -682,9 +682,35 @@ static void sys_close(struct intr_frame* f, uint32_t* args) {
 
 
 
-/*  */
+/* create user thread for user multi thread */
 static void sys_pt_create(struct intr_frame* f, uint32_t* args) {
+ /* 验证参数数组 args 中 args[1]、args[2]、args[3] 本身是否可读 */
+    if (!verify_user_range(&args[1], sizeof(stub_fun)) ||
+        !verify_user_range(&args[2], sizeof(pthread_fun)) ||
+        !verify_user_range(&args[3], sizeof(void*))) {
+        process_exit(-1);
+    }
 
+    stub_fun sfun = (stub_fun) args[1];
+    pthread_fun tfun = (pthread_fun) args[2];
+    void* arg = (void*) args[3];
+
+    /* verufy address pointedd by sfun and tfun if readable   */
+    if (!verify_user_range(sfun, sizeof(stub_fun)) ||
+        !verify_user_range(tfun, sizeof(pthread_fun))) {
+        f->eax = TID_ERROR;
+        return;
+    }
+
+    /* arg can be if not NULL then verify its pointing memory readable   */
+    if (arg != NULL && !verify_user_range(arg, 1)) {
+        f->eax = TID_ERROR;
+        return;
+    }
+
+    /* call pthread_execute to create user thread   */
+    tid_t tid = pthread_execute(sfun, tfun, arg);
+    f->eax = tid;
 }
 
 /*  */

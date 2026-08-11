@@ -509,6 +509,7 @@ static void init_thread(struct thread* t, const char* name, int priority) {
 
   sema_init(&t->exit_sema, 0);
   t->has_been_joined = false;
+  t->user_stack_page = NULL;
 
   t->wake_up_tick = 0;
   list_init(&t->held_locks);
