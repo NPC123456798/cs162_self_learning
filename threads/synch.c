@@ -244,6 +244,7 @@ void lock_acquire(struct lock* lock) {
   {
     sema_down(&lock->semaphore);
     lock->holder = thread_current();
+    list_push_back(&thread_current()->held_locks, &lock->elem);
   } else if (active_sched_policy == SCHED_PRIO)
   {
      // 1. before blocked set im waiting this lock 
@@ -294,6 +295,7 @@ void lock_release(struct lock* lock) {
   if (active_sched_policy == SCHED_FIFO || active_sched_policy == SCHED_DEFAULT)
   {
     lock->holder = NULL;
+    list_remove(&lock->elem);
     sema_up(&lock->semaphore);
   } else if (active_sched_policy == SCHED_PRIO)
   {

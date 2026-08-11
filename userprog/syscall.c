@@ -602,7 +602,7 @@ static void sys_write(struct intr_frame* f, uint32_t* args){
 
 
 
-static void sys_seek(struct intr_frame* f, uint32_t* args) {    
+static void sys_seek(struct intr_frame* f UNUSED, uint32_t* args) {    
     // verify fd
     if (!verify_user_range(&args[1], sizeof(int))) {
         process_exit(-1);
@@ -714,13 +714,27 @@ static void sys_pt_create(struct intr_frame* f, uint32_t* args) {
 }
 
 /*  */
-static void sys_pt_exit(struct intr_frame* f, uint32_t* args) {
+static void sys_pt_exit(struct intr_frame* f, uint32_t* args UNUSED) {
+        struct thread *cur = thread_current();
+    struct process *pcb = cur->pcb;
 
+    // current thread must belongs to a user process 
+    if (pcb == NULL) {
+        // kernel thread shouldn't use this syscall, destroy it
+        thread_exit();
+    }
+
+    if (cur == pcb->main_thread) {
+        pthread_exit_main();   // main thread: wait all child threads then exit 
+    } else {
+        pthread_exit();        // normal thread free source and exit 
+    }
 }
 
 /*  */
 static void sys_pt_join(struct intr_frame* f, uint32_t* args) {
-
+    f->eax = true;
+    return;
 }
 
 /* init lock in kernel and return the kernel lock's idx for user's lock_t

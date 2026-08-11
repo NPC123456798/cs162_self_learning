@@ -79,9 +79,10 @@ void userprog_init(void) {
   }
 
   /* user multithread relative init */
-  list_init(&t->pcb->child_threads);
+  
   t->pcb->active_threads = 0;
   t->pcb->main_exited = false;
+  list_init(&t->pcb->child_threads);
   list_init(&t->pcb->exited_threads);
   sema_init(&t->pcb->thread_exit_sema, 0);
   lock_init(&t->pcb->thread_list_lock);
@@ -204,9 +205,10 @@ static void start_process(void* info_) {
     t->pcb->my_info_as_child = NULL;
 
     /* user multithread relative init */
-    list_init(&t->pcb->child_threads);
+    
     t->pcb->active_threads = 1;
     t->pcb->main_exited = false;
+    list_init(&t->pcb->child_threads);
     list_init(&t->pcb->exited_threads);
     sema_init(&t->pcb->thread_exit_sema, 0);
     lock_init(&t->pcb->thread_list_lock);
@@ -1091,21 +1093,27 @@ bool setup_thread(stub_fun sfun, pthread_fun tfun, void *arg,
         palloc_free_page(kpage);
         return false;
     }
+ 
 
     // 4. record current thread's user stack base address used in thread exit to free 
     thread_current()->user_stack_page = stack_bottom;  // user_stack_page still need to be in  struct thread 
 
-    // 5. in user stack push arguments as cdecl call convention   
-    void *stack_top = stack_bottom + PGSIZE;
-    uint32_t *sp = (uint32_t *) stack_top;
+    // not activate process can't dereference pointer which point to user virtual space address because it will cause kernel bug 
+     // 5.by kernel virtual address kpage init user stack content    
+    //    stack top =  stack_bottom + PGSIZE, so data write from page end to front 
+    uint8_t *base = (uint8_t *) kpage;               // page start kernel address 
+    size_t offset = PGSIZE;                          // from page end 
+    offset -= sizeof(uint32_t);                      // give size for arg 
+    memcpy(base + offset, &arg, sizeof(arg));        // write  arg
+    offset -= sizeof(uint32_t);                      // give space to  tfun 
+    memcpy(base + offset, &tfun, sizeof(tfun));      // write  tfun
+    offset -= sizeof(uint32_t);                      // fake return address
+    uint32_t zero = 0;
+    memcpy(base + offset, &zero, sizeof(zero));      // write 0
 
-    *(--sp) = (uint32_t) arg;       // second argument 
-    *(--sp) = (uint32_t) tfun;      // first argument 
-    *(--sp) = 0;                    // fake return address 
-
-    // 6. set code entry and stack pointer 
+    // 6. set entry and user stack pointer (user virtual address) 
     *eip = sfun;
-    *esp = (void *) sp;
+    *esp = (void *)((uint8_t *) stack_bottom + offset);  // esp point to fake return address position 
 
     return true;
 }
@@ -1160,13 +1168,14 @@ static void start_pthread(void* exec_ ) {
   struct pthread_create_info *info = exec_;
     struct thread *t = thread_current();
     struct process *pcb = info->pcb;
-
+// printf("start_pthread: pcb=%p, lock=%p, child_threads head=%p\n", pcb, &pcb->thread_list_lock, &pcb->child_threads);
     // set process control block 
     t->pcb = pcb;
 
     //  call setup_thread to finish user stack allocation and init  
     void (*eip)(void);
     void *esp;
+    
     if (!setup_thread(info->sfun, info->tfun, info->arg, pcb, &eip, &esp))
         goto fail;
 
@@ -1218,7 +1227,49 @@ tid_t pthread_join(tid_t tid UNUSED) { return -1; }
 
    This function will be implemented in Project 2: Multithreading. For
    now, it does nothing. */
-void pthread_exit(void) {}
+void pthread_exit(void) {
+   struct thread *cur = thread_current();
+    struct process *pcb = cur->pcb;
+    ASSERT(pcb != NULL);
+    ASSERT(cur != pcb->main_thread);  // main thread should call  pthread_exit_main
+
+    enum intr_level old_level = intr_disable();
+    // 1. free user page 
+    if (cur->user_stack_page != NULL) {
+        free_user_page(pcb->pagedir, cur->user_stack_page);
+    }
+
+    // 2. mark self exited and wake up join me thread   
+    cur->has_been_joined = true;               
+    sema_up(&cur->exit_sema);         // at most one joiner blocked here  
+
+    // 3. create tombstone, hang it on  exited_threads list, checked by later joiner    
+    struct thread_exit_info *tomb = malloc(sizeof *tomb);
+    if (tomb != NULL) {
+        tomb->tid = cur->tid;
+        tomb->has_been_joined = (cur->has_been_joined); // if has  joiner blocked  , mark has been joined 
+        lock_acquire(&pcb->thread_list_lock);
+        list_push_back(&pcb->exited_threads, &tomb->elem);
+        lock_release(&pcb->thread_list_lock);
+    }
+
+    // 4. delete self from process active threads list and --active_threads 
+    lock_acquire(&pcb->thread_list_lock);
+    list_remove(&cur->thread_elem);
+    pcb->active_threads--;
+    int remaining = pcb->active_threads;
+    lock_release(&pcb->thread_list_lock);
+
+    // 5. if main thread is in  pthread_exit_main waiting all threads, wake it up 
+    if (pcb->main_exited) {
+        sema_up(&pcb->thread_exit_sema);
+    }
+
+  
+    intr_set_level(old_level);
+    // 6. final destroy kernel thread 
+    thread_exit();
+}
 
 /* Only to be used when the main thread explicitly calls pthread_exit.
    The main thread should wait on all threads in the process to

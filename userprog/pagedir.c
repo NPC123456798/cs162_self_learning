@@ -47,6 +47,8 @@ void pagedir_destroy(uint32_t* pd) {
 
 }
 
+
+
 /* Returns the address of the page table entry for virtual
    address VADDR in page directory PD.
    If PD does not have a page table for VADDR, behavior depends
@@ -79,6 +81,25 @@ static uint32_t* lookup_page(uint32_t* pd, const void* vaddr, bool create) {
   pt = pde_get_pt(*pde);
   return &pt[pt_no(vaddr)];
 }
+
+/* Frees the physical page mapped at user virtual address UADDR
+   in the page directory PD.  Also clears the page table entry.
+   Does nothing if UADDR is not mapped. */
+void free_user_page(uint32_t *pd, void *uaddr) {
+    uint32_t *pte;
+
+    ASSERT(pd != NULL);
+    ASSERT(is_user_vaddr(uaddr));
+    ASSERT(pg_ofs(uaddr) == 0);  // must page align 
+
+    pte = lookup_page(pd, uaddr, false);  // not create new pagetable 
+    if (pte != NULL && (*pte & PTE_P)) {
+        void *kpage = pagedir_get_page(pd, uaddr);  
+        palloc_free_page(kpage);
+        *pte = 0;  //clear pte to avoid free again  
+    }
+}
+
 
 /* Adds a mapping in page directory PD from user virtual page
    UPAGE to the physical frame identified by kernel virtual
