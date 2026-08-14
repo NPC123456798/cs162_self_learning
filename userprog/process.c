@@ -170,7 +170,7 @@ pid_t process_execute(const char* file_name) {
   } else {
     free(info->child);
   }
-  // ! here i forget why do it, maybe its unnecessary, but i think i just don't change it now
+  // TODO: here i forget why do it, maybe its unnecessary, but i think i just don't change it now
   sema_up(&info->load_sema);
 
   
@@ -429,19 +429,44 @@ void process_exit(int status) {
   cur->exit_cleaned = true;
   intr_set_level(old_level);
 
-
+  
 
 /* 2. force waking up process's all blocked thread  */
   lock_acquire(&pcb->thread_list_lock);
   struct list_elem *e;
   for (e = list_begin(&pcb->child_threads); e != list_end(&pcb->child_threads); e = list_next(e)) {
       struct thread *t = list_entry(e, struct thread, thread_elem);
-      if (t != cur && t->status == THREAD_BLOCKED)
+      if (t->self_tombstone != NULL)
+      {
+        t->self_tombstone = NULL;
+        free(t->self_tombstone);
+      }
+      
+      if (t != cur && t->status == THREAD_BLOCKED){
+          if (t->waiting_cond != NULL || t->waiting_lock != NULL || t->waiting_sema != NULL)
+          {
+            list_remove(&t->elem);
+          }
+          
           thread_unblock(t);
+        }
   }
+
+
+  
   /* record need to wait other threads' number (current active_threads include self )   */
   int to_wait = pcb->active_threads - 1;
   lock_release(&pcb->thread_list_lock);
+
+  if (pcb->main_thread != NULL && pcb->main_thread->status == THREAD_BLOCKED)
+  {
+    if (pcb->main_thread->waiting_cond != NULL && pcb->main_thread->waiting_lock != NULL|| pcb->main_thread->waiting_sema != NULL)
+    {
+      list_remove(&pcb->main_thread->elem);
+    }
+    thread_unblock(pcb->main_thread);
+  }
+  
 
   /* 4. wait other threads all exit (use semaphore) */
   while (to_wait-- > 0)
@@ -449,6 +474,14 @@ void process_exit(int status) {
 
 
 
+    /*  5. clear all remained tombstones (they are all threads which nobody join)    */
+  lock_acquire(&pcb->thread_list_lock);
+  while (!list_empty(&pcb->exited_threads)) {
+      struct list_elem *e = list_pop_front(&pcb->exited_threads);
+      struct thread_exit_info *t = list_entry(e, struct thread_exit_info, elem);
+      free(t);
+  }
+  lock_release(&pcb->thread_list_lock);
 
 
 
@@ -1114,9 +1147,7 @@ bool is_main_thread(struct thread* t, struct process* p) { return p->main_thread
 /* Gets the PID of a process */
 pid_t get_pid(struct process* p) { return (pid_t)p->main_thread->tid; }
 
-static inline void invlpg(void *addr) {
-    asm volatile("invlpg (%0)" : : "r"(addr) : "memory");
-}
+
 /* Creates a new stack for the thread and sets up its arguments.
    Stores the thread's entry point into *EIP and its initial stack
    pointer into *ESP. Handles all cleanup if unsuccessful. Returns
@@ -1165,7 +1196,7 @@ bool setup_thread(stub_fun sfun, pthread_fun tfun, void *arg,
     // 6. set entry and user stack pointer (user virtual address) 
     *eip = sfun;
     *esp = (void *)((uint8_t *) stack_bottom + offset);  // esp point to fake return address position 
-invlpg(kpage);
+
 
     return true;
 }
@@ -1279,7 +1310,89 @@ fail:
 
    This function will be implemented in Project 2: Multithreading. For
    now, it does nothing. */
-tid_t pthread_join(tid_t tid UNUSED) { return -1; }
+tid_t pthread_join(tid_t tid ) { 
+
+    struct thread *cur = thread_current();
+    struct process *pcb = cur->pcb;
+    struct list_elem *e;
+
+
+    // first step: seek target thread in tombstone list 
+    lock_acquire(&pcb->thread_list_lock);
+    for (e = list_begin(&pcb->exited_threads);
+        e != list_end(&pcb->exited_threads); e = list_next(e)) {
+        struct thread_exit_info *tomb = list_entry(e, struct thread_exit_info, elem);
+        if (tomb->tid == tid) {
+            // find tombstone means target thread is exited 
+            if (tomb->has_been_joined) {
+                // has been join 
+                lock_release(&pcb->thread_list_lock);
+                return TID_ERROR;
+            }
+            // be the tomb's joiner 
+            list_remove(e);
+            lock_release(&pcb->thread_list_lock);
+            free(tomb);
+            return tid;
+        }
+    }
+
+    // second step:not find tombstone then seek in active thread list just child list 
+    struct thread *target = NULL;
+   /* extra check: main thread is not in child_threads    */
+    if (tid == pcb->main_thread->tid) {
+        target = pcb->main_thread;
+    } else {
+        /* seek in child_threads */
+        for (e = list_begin(&pcb->child_threads);
+            e != list_end(&pcb->child_threads); e = list_next(e)) {
+            struct thread *t = list_entry(e, struct thread, thread_elem);
+            if (t->tid == tid) {
+                target = t;
+                break;
+            }
+        }
+    } 
+
+    // if two list all not have it which means TID is unuse or not belongs to current process    
+    if (target == NULL ) {
+        lock_release(&pcb->thread_list_lock);
+
+        return TID_ERROR;
+    }
+
+    // check target thread if has been joined  
+    if (target->has_been_joined) {
+        lock_release(&pcb->thread_list_lock);
+        return TID_ERROR;
+    }
+
+    // mark joined to avoid other thread join again  
+    target->has_been_joined = true;
+    lock_release(&pcb->thread_list_lock);
+
+
+    struct thread_exit_info *tomb = malloc(sizeof *tomb);
+    if (tomb != NULL) {
+        tomb->tid = cur->tid;
+        tomb->has_been_joined = true; 
+        sema_init(&tomb->exit_sema, 0);
+    }
+
+    // ! never use the resource whose life cycle maybe shorter than time you need it even just 0.000000000001% to be shorter than you need
+    cur->self_tombstone = tomb;
+    target->other_give_tombstone = tomb;
+    // block to wait target thread exit 
+    sema_down(&tomb->exit_sema);
+
+
+    enum intr_level old_level = intr_disable();
+    free(tomb);
+    cur->self_tombstone = NULL;
+
+    intr_set_level(old_level);
+    return tid;
+}
 
 /* Free the current thread's resources. Most resources will
    be freed on thread_exit(), so all we have to do is deallocate the
@@ -1303,13 +1416,17 @@ void pthread_exit(void) {
         free_user_page(pcb->pagedir, cur->user_stack_page);
     }
 
-    // 2. mark self exited and wake up join me thread   
-    cur->has_been_joined = true;               
-    sema_up(&cur->exit_sema);         // at most one joiner blocked here  
+    // 2. mark self exited and wake up join me thread 
+      // TODO: here i need to think do i need a truly exited mark from itself
+    // cur->has_been_joined = true;               
 
     // 3. create tombstone, hang it on  exited_threads list, checked by later joiner    
     struct thread_exit_info *tomb = malloc(sizeof *tomb);
-    if (tomb != NULL) {
+    // if has joined just tell the joiner but if not then create a tomb for self
+    if (cur->has_been_joined && cur->other_give_tombstone != NULL)
+    {
+      sema_up(&cur->other_give_tombstone->exit_sema);
+    } else if (tomb != NULL) {
         tomb->tid = cur->tid;
         tomb->has_been_joined = (cur->has_been_joined); // if has  joiner blocked  , mark has been joined 
         lock_acquire(&pcb->thread_list_lock);
@@ -1323,6 +1440,8 @@ void pthread_exit(void) {
     pcb->active_threads--;
     int remaining = pcb->active_threads;
     lock_release(&pcb->thread_list_lock);
+
+
 
     // 5. if main thread is in  pthread_exit_main waiting all threads, wake it up 
     if (pcb->main_exited) {
@@ -1343,5 +1462,51 @@ void pthread_exit(void) {
 
    This function will be implemented in Project 2: Multithreading. For
    now, it does nothing. */
-void pthread_exit_main(void) {}
+void pthread_exit_main(void) {
+   struct thread *cur = thread_current();
+    struct process *pcb = cur->pcb;
+    ASSERT(pcb != NULL);
+    ASSERT(cur == pcb->main_thread);
+
+    // 1. markk main thread has called pthread_exit  to make child thread at exit time to call  
+    //    sema_up(&pcb->thread_exit_sema) to notify main thread 
+    lock_acquire(&pcb->thread_list_lock);
+    pcb->main_exited = true;
+    int to_wait = pcb->active_threads - 1;  // the number of child threads who needs to be waited
+
+    lock_release(&pcb->thread_list_lock);
+    struct thread_exit_info *tomb = malloc(sizeof *tomb);
+    // 2. logically exit main thread: wake up maybe is joining main thread's thread   
+    // the key is  exit_sema is stored in tombstone this third data struct and its life cycle is longer than kernel thread struct
+    // its very very important because the use for has been cycled resource will cause all kinds of bugs 
+    if (cur->has_been_joined && cur->other_give_tombstone != NULL)
+    {
+      sema_up(&cur->other_give_tombstone->exit_sema);
+    } else if (tomb != NULL) {
+        tomb->tid = cur->tid;
+        // actually come here means main thread not be joined
+        tomb->has_been_joined = cur->has_been_joined;
+        lock_acquire(&pcb->thread_list_lock);
+        list_push_back(&pcb->exited_threads, &tomb->elem);
+        lock_release(&pcb->thread_list_lock);
+    }
+    
+
+    
+  
+    
+
+
+    
+
+    // 3. wait all child threads exit, every child thread exit, if main_exited is true then   
+    //    execute sema_up(&pcb->thread_exit_sema)¡£
+    for (int i = 0; i < to_wait; i++)
+        sema_down(&pcb->thread_exit_sema);
+
+  
+
+    // 5. exit process with status 0  
+    process_exit(0);
+}
 

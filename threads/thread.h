@@ -99,12 +99,17 @@ struct thread {
   struct process* pcb; /* Process control block if this thread is a userprog */
 #endif
   /* used in user multithread  */
-  struct semaphore exit_sema; // used in join wait 
+  
   bool has_been_joined;       // if has been joined  
   struct list_elem thread_elem; // hang on parent process active threads list
   void *user_stack_page;
   bool exit_cleaned; /* mark thread's parent process if exit, if true then all thread should end it at switch tail  */
   bool in_child_list; /* mark thread if hanged on the process's child thread list */
+  struct semaphore *waiting_cond;
+  struct semaphore *waiting_sema;
+  struct thread_exit_info *self_tombstone; /* this tombstone is created by myself for my join object */
+  struct thread_exit_info *other_give_tombstone; /* this tombstone is passed by my joiner, not created by myself */
+
 
   int64_t wake_up_tick;   /* tick number, wake up when time coming */
   struct list held_locks; /* but one thread can hold many locks */
@@ -117,6 +122,7 @@ struct thread {
 struct thread_exit_info {
     tid_t tid;                  // exited thread's tid 
     bool has_been_joined; 
+    struct semaphore exit_sema; // used in join wait 
     struct list_elem elem;      // hang on pcb->exited_threads list
 };
 

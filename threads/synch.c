@@ -60,6 +60,7 @@ void sema_down(struct semaphore* sema) {
 
   ASSERT(sema != NULL);
   ASSERT(!intr_context());
+  thread_current()->waiting_sema = sema;
 
   old_level = intr_disable();
   if (active_sched_policy == SCHED_FIFO || active_sched_policy == SCHED_DEFAULT)
@@ -84,6 +85,7 @@ void sema_down(struct semaphore* sema) {
     sema->value--;
   }
   
+  thread_current()->waiting_sema = NULL;
   
   intr_set_level(old_level);
 }
@@ -428,8 +430,10 @@ void cond_wait(struct condition* cond, struct lock* lock) {
 
   sema_init(&waiter.semaphore, 0);
   list_push_back(&cond->waiters, &waiter.elem);
+  thread_current()->waiting_cond = cond;
   lock_release(lock);
   sema_down(&waiter.semaphore);
+    thread_current()->waiting_cond = NULL;
   lock_acquire(lock);
 }
 

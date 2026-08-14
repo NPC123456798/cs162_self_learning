@@ -39,7 +39,7 @@ struct process {
    struct child *my_info_as_child; // it points to parent process' child process which is this current process in parent process' children list
 
    /* used by user multithread */
-   struct list child_threads;          // all active child threads 
+   struct list child_threads;          /* all active child threads , not include main thread because its not child threads */ 
    int active_threads;                 // all threads which is not exited and its parent process is this pcb number (include main thread ) 
    bool main_exited;                   // main thread if call pthread_exit  
    struct list exited_threads;   /* put tombstones for exited child threads */

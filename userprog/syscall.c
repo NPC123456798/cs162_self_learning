@@ -366,6 +366,7 @@ static void sys_wait(struct intr_frame* f, uint32_t* args) {
                 process_exit(-1);
                 return;
             }
+
             pid_t pid = *(pid_t*)(f->esp + 4);
             f->eax = process_wait(pid);
         }
@@ -713,7 +714,7 @@ static void sys_pt_create(struct intr_frame* f, uint32_t* args) {
     f->eax = tid;
 }
 
-/*  */
+/* use pthread_exit, for main thread exit use special pthread_exit_main */
 static void sys_pt_exit(struct intr_frame* f, uint32_t* args UNUSED) {
         struct thread *cur = thread_current();
     struct process *pcb = cur->pcb;
@@ -731,10 +732,20 @@ static void sys_pt_exit(struct intr_frame* f, uint32_t* args UNUSED) {
     }
 }
 
-/*  */
+/*  call kernel's pthread_join */
 static void sys_pt_join(struct intr_frame* f, uint32_t* args) {
-    f->eax = true;
-    return;
+     // argument check, make sure args[1] is valid in user stack store position    
+    if (!verify_user_range(&args[1], sizeof(tid_t))) {
+        f->eax = TID_ERROR;
+        return;
+    }
+
+
+    tid_t tid = (tid_t) args[1];
+
+    // call kernel's  pthread_join 
+    f->eax = pthread_join(tid);
+
 }
 
 /* init lock in kernel and return the kernel lock's idx for user's lock_t
@@ -745,7 +756,11 @@ static void sys_lock_init(struct intr_frame* f, uint32_t* args) {
         process_exit(-1);
     }
     char* lock_item = args[1];
-
+    if (lock_item == NULL)
+    {
+        f->eax = false;
+        return;
+    }
     /* check lock the char's validation */
     if (!verify_user_range(lock_item, sizeof(char))) {
         process_exit(-1);
@@ -789,7 +804,11 @@ static void sys_lock_acquire(struct intr_frame* f, uint32_t* args) {
         process_exit(-1);
     }
     char* lock_item = args[1];
-
+    if (lock_item == NULL)
+    {
+        f->eax = false;
+        return;
+    }
     /* check lock the char's validation */
     if (!verify_user_range(lock_item, sizeof(char))) {
         process_exit(-1);
@@ -833,7 +852,11 @@ static void sys_lock_release(struct intr_frame* f, uint32_t* args) {
         process_exit(-1);
     }
     char* lock_item = args[1];
-
+    if (lock_item == NULL)
+    {
+        f->eax = false;
+        return;
+    }
     /* check lock the char's validation */
     if (!verify_user_range(lock_item, sizeof(char))) {
         process_exit(-1);
@@ -880,10 +903,16 @@ static void sys_lock_release(struct intr_frame* f, uint32_t* args) {
 /* just find free sema in table and then allocate it and return its idx */
 static void sys_sema_init(struct intr_frame* f, uint32_t* args) {
     if (!verify_user_range(&args[1], sizeof(char*))) {
+        printf("come 892\n");
         process_exit(-1);
     }
     char* u_sema = (char*)args[1];
-
+    if (u_sema == NULL)
+    {
+        f->eax = false;
+        return;
+    }
+    
     // check one byte pointed by u_sema if valid 
     if (!verify_user_range(u_sema, sizeof(char))) {
         process_exit(-1);
@@ -894,7 +923,11 @@ static void sys_sema_init(struct intr_frame* f, uint32_t* args) {
         process_exit(-1);
     }
     int initial_val = (int)args[2];
-
+    if (initial_val < 0)
+    {
+        f->eax = false;
+        return;
+    }
 
 
     lock_acquire(&table_lock);
@@ -937,6 +970,12 @@ static void sys_sema_down(struct intr_frame* f, uint32_t* args) {
     }
     char* u_sema = (char*)args[1];
 
+    if (u_sema == NULL)
+    {
+        f->eax = false;
+        return;
+    }
+
     if (!verify_user_range(u_sema, sizeof(char))) {
         process_exit(-1);
     }
@@ -970,6 +1009,11 @@ static void sys_sema_up(struct intr_frame* f, uint32_t* args) {
         process_exit(-1);
     }
     char* u_sema = (char*)args[1];
+    if (u_sema == NULL)
+    {
+        f->eax = false;
+        return;
+    }
 
     if (!verify_user_range(u_sema, sizeof(char))) {
         process_exit(-1);

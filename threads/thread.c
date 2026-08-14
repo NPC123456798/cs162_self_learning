@@ -507,15 +507,19 @@ static void init_thread(struct thread* t, const char* name, int priority) {
   t->effective_priority = priority;
   t->pcb = NULL;
 
-  sema_init(&t->exit_sema, 0);
   t->has_been_joined = false;
   t->user_stack_page = NULL;
   t->exit_cleaned = false;
   t->in_child_list = false;
+  t->waiting_cond = NULL;
+  t->waiting_sema = NULL;
+  t->self_tombstone = NULL;
+  t->other_give_tombstone = NULL;
 
   t->wake_up_tick = 0;
   list_init(&t->held_locks);
   t->waiting_lock = NULL;
+
 
   t->magic = THREAD_MAGIC;
 
@@ -646,7 +650,7 @@ void thread_switch_tail(struct thread* prev) {
     // 2. decrement count, don't remove from the active thread list just child_list because all elem is in kernel thread 
     // struct so thread exit will recycle it naturally, process_exit's iteration won't iterate again so don't worry
     struct process *pcb = cur->pcb;
-    lock_acquire(&pcb->thread_list_lock);   // protect counter 
+
     
     pcb->active_threads--;
        // safely remove elem, only when flag is true then execute list_remove    
@@ -654,7 +658,7 @@ void thread_switch_tail(struct thread* prev) {
         list_remove(&cur->thread_elem);   // physical remove from list 
         cur->in_child_list = false;       // reset flag (avoid same thread come here again)
     }
-    lock_release(&pcb->thread_list_lock);
+
 
     // here must use a extra sema for process exit to make semantic clear or the reuse for main thread exit semaphore will cause problem like
     // finally no thread wake up thread which call process exit and let process can't exit.
