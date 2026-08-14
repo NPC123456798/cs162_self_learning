@@ -438,8 +438,9 @@ void process_exit(int status) {
       struct thread *t = list_entry(e, struct thread, thread_elem);
       if (t->self_tombstone != NULL)
       {
-        t->self_tombstone = NULL;
         free(t->self_tombstone);
+        t->self_tombstone = NULL;
+        
       }
       
       if (t != cur && t->status == THREAD_BLOCKED){
@@ -458,9 +459,17 @@ void process_exit(int status) {
   int to_wait = pcb->active_threads - 1;
   lock_release(&pcb->thread_list_lock);
 
+  if (pcb->main_thread != NULL && pcb->main_thread->self_tombstone != NULL)
+  {
+    free(pcb->main_thread->self_tombstone);
+    pcb->main_thread->self_tombstone = NULL;
+  }
   if (pcb->main_thread != NULL && pcb->main_thread->status == THREAD_BLOCKED)
   {
-    if (pcb->main_thread->waiting_cond != NULL && pcb->main_thread->waiting_lock != NULL|| pcb->main_thread->waiting_sema != NULL)
+    
+    
+    if (pcb->main_thread->waiting_cond != NULL || pcb->main_thread->waiting_lock != NULL 
+      || pcb->main_thread->waiting_sema != NULL)
     {
       list_remove(&pcb->main_thread->elem);
     }
