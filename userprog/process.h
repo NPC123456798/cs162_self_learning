@@ -40,10 +40,11 @@ struct process {
 
    /* used by user multithread */
    struct list child_threads;          // all active child threads 
-   int active_threads;                 // current active threads number (include main thread) 
+   int active_threads;                 // all threads which is not exited and its parent process is this pcb number (include main thread ) 
    bool main_exited;                   // main thread if call pthread_exit  
-   struct list exited_threads;
+   struct list exited_threads;   /* put tombstones for exited child threads */
    struct semaphore thread_exit_sema;    // main thread wait child threads exit 
+   struct semaphore process_exit_sema;
    struct lock thread_list_lock;         // protect upon lists 
    void *next_stack_bottom;  // next user thread stack's user space virtual base address 
    bool exit_in_progress;

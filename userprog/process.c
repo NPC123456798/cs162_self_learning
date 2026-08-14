@@ -85,6 +85,7 @@ void userprog_init(void) {
   list_init(&t->pcb->child_threads);
   list_init(&t->pcb->exited_threads);
   sema_init(&t->pcb->thread_exit_sema, 0);
+  sema_init(&t->pcb->process_exit_sema, 0);
   lock_init(&t->pcb->thread_list_lock);
 
 
@@ -211,6 +212,7 @@ static void start_process(void* info_) {
     list_init(&t->pcb->child_threads);
     list_init(&t->pcb->exited_threads);
     sema_init(&t->pcb->thread_exit_sema, 0);
+    sema_init(&t->pcb->process_exit_sema, 0);
     lock_init(&t->pcb->thread_list_lock);
     t->pcb->next_stack_bottom = (void *)(((uint8_t*)PHYS_BASE) - 2 * PGSIZE);
     t->pcb->exit_in_progress = false;
@@ -443,7 +445,7 @@ void process_exit(int status) {
 
   /* 4. wait other threads all exit (use semaphore) */
   while (to_wait-- > 0)
-      sema_down(&pcb->thread_exit_sema);
+      sema_down(&pcb->process_exit_sema);
 
 
 
@@ -660,6 +662,7 @@ pid_t process_fork(struct intr_frame *parent_if) {
     child_pcb->main_exited = false;
     list_init(&child_pcb->exited_threads);
     sema_init(&child_pcb->thread_exit_sema, 0);
+    sema_init(&child_pcb->process_exit_sema, 0);
     lock_init(&child_pcb->thread_list_lock);
     child_pcb->next_stack_bottom = parent_pcb->next_stack_bottom; 
     child_pcb->exit_in_progress = false;
@@ -1246,6 +1249,7 @@ static void start_pthread(void* exec_ ) {
     // hang thread into process active thread list 
     lock_acquire(&pcb->thread_list_lock);
     list_push_back(&pcb->child_threads, &t->thread_elem);
+    t->in_child_list = true;
     pcb->active_threads++;
     lock_release(&pcb->thread_list_lock);
 
