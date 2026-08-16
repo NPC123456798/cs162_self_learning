@@ -20,6 +20,8 @@
    of thread.h for details. */
 #define THREAD_MAGIC 0xcd6abf4b
 
+#define NICE_0_WEIGHT 4096
+
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
 static struct list fifo_ready_list;
@@ -27,6 +29,7 @@ static struct list fifo_ready_list;
 
 static struct list prio_ready_list;
 
+static struct list fair_ready_list;
 
 /* List of all processes.  Processes are added to this list
    when they are first scheduled and removed when they exit. */
@@ -118,6 +121,7 @@ void thread_init(void) {
 
   list_init(&fifo_ready_list);
   list_init(&prio_ready_list);
+  list_init(&fair_ready_list);
   list_init(&all_list);
 
   /* Set up a thread structure for the running thread. */
@@ -157,9 +161,36 @@ void thread_tick(void) {
   else
     kernel_ticks++;
 
-  /* Enforce preemption. */
-  if (++thread_ticks >= TIME_SLICE)
+  // 更新 vruntime
+  if (active_sched_policy == SCHED_FAIR) {
+      t->vruntime += (NICE_0_WEIGHT / t->weight);
+      
+  }
+
+  /* here comes to the key of cfs, dynamic time slice allocated to threads with different weight
+    it can let the run time difference be obvious, or you can let the vruntime's value be the decider of
+    if interruption return yield, it will be more naturally and useful just use vruntime >= a_proper_value then if it
+    true just  intr_yield_on_return(), its more cfs thinking, but do this need to redesign the increase speed of vruntime
+    so i just think about it and don't try again because test can be pass in this way */
+  if (active_sched_policy == SCHED_FAIR)
+  {
+    int time_slice = t->weight / 8;
+    int counter = 0;
+    while (time_slice)
+    {
+      time_slice /= 2;
+      counter++;
+    }
+    
+
+    if (++thread_ticks >= counter + 1)
     intr_yield_on_return();
+  } else {
+    /* Enforce preemption. */
+    if (++thread_ticks >= TIME_SLICE)
+    intr_yield_on_return();
+  }
+  
 }
 
 /* Prints thread statistics. */
@@ -270,6 +301,21 @@ static void thread_enqueue(struct thread* t) {
         // or go to the end and insert in to end so that fifo in same priority 
     }
     list_insert(e, &t->elem);
+  }else if (active_sched_policy == SCHED_FAIR)
+  {
+    struct list_elem *e;
+    /* iterate fair_ready_list, find first node whose vruntime larger than t->vruntime */
+    for (e = list_begin(&fair_ready_list);
+         e != list_end(&fair_ready_list);
+         e = list_next(e)) {
+        struct thread *cur = list_entry(e, struct thread, elem);
+        if (t->vruntime < cur->vruntime ||
+            (t->vruntime == cur->vruntime && t->weight > cur->weight)) {
+            break;   /* insert to the front of the node to keep ascending order   */
+        }
+        /* if t->vruntime >= cur->vruntime continue  */
+    }
+    list_insert(e, &t->elem);
   }else
     PANIC("Unimplemented scheduling policy value: %d", active_sched_policy);
 }
@@ -289,6 +335,14 @@ void thread_unblock(struct thread* t) {
 
   old_level = intr_disable();
   ASSERT(t->status == THREAD_BLOCKED);
+  /* the waked up thread will be setted to the min vruntime */
+  if (active_sched_policy == SCHED_FAIR && !list_empty(&fair_ready_list)) {
+    struct thread *head = list_entry(list_front(&fair_ready_list), struct thread, elem);
+    int64_t min_vruntime = head->vruntime;
+    if (t->vruntime >= min_vruntime) {
+        t->vruntime = min_vruntime;   
+    }
+}
   thread_enqueue(t);
   t->status = THREAD_READY;
   intr_set_level(old_level);
@@ -402,7 +456,13 @@ void thread_set_priority(int new_priority) {
     }
 
     intr_set_level(old_level);
+  } else if (active_sched_policy == SCHED_FAIR)
+  {
+    int group = new_priority  / 8;
+    int offset = new_priority % 8;
+    cur->weight = (1 << group) * (8 + offset);
   }
+  
   
 }
 
@@ -516,6 +576,12 @@ static void init_thread(struct thread* t, const char* name, int priority) {
   t->self_tombstone = NULL;
   t->other_give_tombstone = NULL;
 
+  t->vruntime = 0;
+  int group = t->priority / 8;
+  int offset = t->priority % 8;
+  t->weight = (1 << group) * (8 + offset);
+
+
   t->wake_up_tick = 0;
   list_init(&t->held_locks);
   t->waiting_lock = NULL;
@@ -557,7 +623,10 @@ static struct thread* thread_schedule_prio(void) {
 
 /* Fair priority scheduler */
 static struct thread* thread_schedule_fair(void) {
-  PANIC("Unimplemented scheduler policy: \"-sched=fair\"");
+if (!list_empty(&fair_ready_list))
+    return list_entry(list_pop_front(&fair_ready_list), struct thread, elem);
+  else
+    return idle_thread;
 }
 
 /* Multi-level feedback queue scheduler */

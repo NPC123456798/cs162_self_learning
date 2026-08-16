@@ -83,7 +83,15 @@ void sema_down(struct semaphore* sema) {
         thread_block();
     }
     sema->value--;
+  } else if (active_sched_policy == SCHED_FAIR)
+  {
+    while (sema->value == 0) {
+      list_push_back(&sema->waiters, &thread_current()->elem);
+      thread_block();
+    }
+    sema->value--;
   }
+  
   
   thread_current()->waiting_sema = NULL;
   
@@ -169,6 +177,11 @@ void sema_up(struct semaphore* sema) {
     }
     
     
+  } else if (active_sched_policy == SCHED_FAIR)
+  {
+    if (!list_empty(&sema->waiters))
+    thread_unblock(list_entry(list_pop_front(&sema->waiters), struct thread, elem));
+    sema->value++;
   }
   
   
@@ -262,6 +275,11 @@ void lock_acquire(struct lock* lock) {
     // 3. record hold relationship and then put lock into held_locks list 
     list_push_back(&cur->held_locks, &lock->elem);
     lock->holder = cur;
+  } else if (active_sched_policy == SCHED_FAIR)
+  {
+    sema_down(&lock->semaphore);
+    lock->holder = thread_current();
+    list_push_back(&thread_current()->held_locks, &lock->elem);
   }
   
   
@@ -313,6 +331,11 @@ void lock_release(struct lock* lock) {
 
 
     intr_set_level(old_level);
+  } else if (active_sched_policy == SCHED_FAIR)
+  {
+    lock->holder = NULL;
+    list_remove(&lock->elem);
+    sema_up(&lock->semaphore);
   }
   
   
@@ -478,7 +501,12 @@ void cond_signal(struct condition* cond, struct lock* lock UNUSED) {
       list_remove(max_elem);
       sema_up(&max_waiter->semaphore);
     }
+  } else if (active_sched_policy == SCHED_FAIR)
+  {
+    if (!list_empty(&cond->waiters))
+    sema_up(&list_entry(list_pop_front(&cond->waiters), struct semaphore_elem, elem)->semaphore);
   }
+  
 }
   
   

@@ -111,7 +111,14 @@ struct thread {
   struct thread_exit_info *other_give_tombstone; /* this tombstone is passed by my joiner, not created by myself */
 
 
+  /* fair schedule  */
+  int64_t vruntime;
+  int weight;  // can be calculated in init_thread as  priority 
+
+
+  /* high efficient alarm for sleep threads */
   int64_t wake_up_tick;   /* tick number, wake up when time coming */
+
   struct list held_locks; /* but one thread can hold many locks */
   struct lock *waiting_lock; /* one thread only can wait one lock */
   /* Owned by thread.c. */

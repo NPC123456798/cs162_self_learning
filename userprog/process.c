@@ -1447,13 +1447,15 @@ void pthread_exit(void) {
     lock_acquire(&pcb->thread_list_lock);
     list_remove(&cur->thread_elem);
     pcb->active_threads--;
-    int remaining = pcb->active_threads;
+    /* here main_exited judge must put in the list_lock because main_exited set also put in this lock
+     it can avoid child and main thread exit at the same time and last child thread can't sema_up main_thread  */
+    bool last_thread = (pcb->active_threads == 1 && pcb->main_exited);
     lock_release(&pcb->thread_list_lock);
 
 
 
     // 5. if main thread is in  pthread_exit_main waiting all threads, wake it up 
-    if (pcb->main_exited) {
+    if (last_thread) {
         sema_up(&pcb->thread_exit_sema);
     }
 
@@ -1481,9 +1483,12 @@ void pthread_exit_main(void) {
     //    sema_up(&pcb->thread_exit_sema) to notify main thread 
     lock_acquire(&pcb->thread_list_lock);
     pcb->main_exited = true;
-    int to_wait = pcb->active_threads - 1;  // the number of child threads who needs to be waited
-
+    bool no_children_left = (pcb->active_threads == 1);
     lock_release(&pcb->thread_list_lock);
+
+
+
+
     struct thread_exit_info *tomb = malloc(sizeof *tomb);
     // 2. logically exit main thread: wake up maybe is joining main thread's thread   
     // the key is  exit_sema is stored in tombstone this third data struct and its life cycle is longer than kernel thread struct
@@ -1507,12 +1512,13 @@ void pthread_exit_main(void) {
 
 
     
-
-    // 3. wait all child threads exit, every child thread exit, if main_exited is true then   
-    //    execute sema_up(&pcb->thread_exit_sema)¡£
-    for (int i = 0; i < to_wait; i++)
-        sema_down(&pcb->thread_exit_sema);
-
+    /* only need the last child thread to notify main thread
+      its much better than before i let main thread use the child threads number to sema_down same times
+      its unnecessary and wastegul and complexer. now use the no_children_left bool to judge if sema_down. clearly and easier with
+      active threads variable maintain,and when active_threads subtract to 1 the last exited child thread will sema_up main_thread   */
+    if (!no_children_left) {
+        sema_down(&pcb->thread_exit_sema); 
+    }
   
 
     // 5. exit process with status 0  

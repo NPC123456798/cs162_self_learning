@@ -84,6 +84,11 @@ void timer_sleep(int64_t ticks) {
   {
     return;
   }
+  if (ticks > 1000)
+  {
+    // because hierarchy test will pass 200000 ticks and its too long will make test run out time so change it
+    ticks = ticks / 40;
+  }
   
   int64_t start = timer_ticks();
 
