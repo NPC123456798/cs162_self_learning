@@ -9,10 +9,12 @@ static struct cache_block cache[CACHE_SIZE];
 static struct list cache_list; // store all stored cache block in list
 static struct lock cache_lock;
 static struct list_elem* clock_hand;
+static struct condition cache_block_freed;
 
 void cache_init(void) {
     lock_init(&cache_lock);
     list_init(&cache_list);
+    cond_init(&cache_block_freed);
 
     for (int i = 0; i < CACHE_SIZE; i++) {
         struct cache_block* b = &cache[i];
@@ -26,7 +28,6 @@ void cache_init(void) {
         b->loading = false;
         list_push_back(&cache_list, &b->elem); // push all cache block into list
     }
-
     clock_hand = list_begin(&cache_list);
 }
 
@@ -61,8 +62,10 @@ static struct cache_block* cache_evict_locked(void) {
             }
         }
     }
-    PANIC("No evictable cache block");
+    return NULL; // without can be evicted  block
 }
+
+
 struct cache_block* cache_get_block(block_sector_t sector, bool exclusive) {
     // this is necessary for avoiding situation of searching sector but the block's sector state is changed by the next eviction logic 
     // for search evicted block and cache hit block so  searching and block state change operation must in the same global cache lock protection.
@@ -71,12 +74,13 @@ struct cache_block* cache_get_block(block_sector_t sector, bool exclusive) {
     // 1. try to hit, searching
     struct cache_block* b = cache_lookup_locked(sector);
     if (b != NULL) {
-        b->ref_cnt++;
+        b->ref_cnt++; // must under cache lock's protection
         // get block lock(read write lock) 
         rw_lock_acquire(&b->rw_lock, exclusive ? RW_WRITER : RW_READER);
         lock_release(&cache_lock);
 
         // if block is loading waiting until loading finish 
+        // TODO: maybe can be removed because valid loading set at same time and cache search operation is mutual exclusion with flags set 
         lock_acquire(&b->state_lock);
         while (b->loading) {
             cond_wait(&b->waiters, &b->state_lock);
@@ -87,6 +91,11 @@ struct cache_block* cache_get_block(block_sector_t sector, bool exclusive) {
 
     // 2. not hit and select a evicted block, searching
     b = cache_evict_locked();
+    while (b == NULL) {
+        // without available block until block free 
+        cond_wait(&cache_block_freed, &cache_lock);   // free cache_lock and sleep until waken up and try to get block again
+        b = cache_evict_locked();
+    }
     // keep old sector number used in write back 
     block_sector_t old_sector = b->sector;
     bool old_dirty = b->dirty;
@@ -113,11 +122,12 @@ struct cache_block* cache_get_block(block_sector_t sector, bool exclusive) {
 
     block_read(fs_device, sector, b->data);
 
-    // 5. update state: load finished
-    lock_acquire(&b->state_lock);
+    // 5. update state: load finished, use cache lock for valid change because valid flag is about searching operation
+    lock_acquire(&cache_lock);
     b->valid = true;
     b->loading = false;
-    lock_release(&b->state_lock);
+    lock_release(&cache_lock);
+
     cond_broadcast(&b->waiters, &b->state_lock);   // awake up all threads waiting this block 
 
     // 6. get rwlock by exclusive and then return 
@@ -127,12 +137,16 @@ struct cache_block* cache_get_block(block_sector_t sector, bool exclusive) {
 
 
 void cache_release_block(struct cache_block* b, bool exclusive) {
-    // release rwlock
+   // 1. release rw_lock
     rw_lock_release(&b->rw_lock, exclusive ? RW_WRITER : RW_READER);
 
-    // subtract ref_cnt 
-    lock_acquire(&b->state_lock);
+    // 2. fix ref counter (need cache lock for search operation safety)
+    lock_acquire(&cache_lock);
     ASSERT(b->ref_cnt > 0);
     b->ref_cnt--;
-    lock_release(&b->state_lock);
+    if (b->ref_cnt == 0) {
+        cond_signal(&cache_block_freed, &cache_lock);
+    }
+    lock_release(&cache_lock);
+    
 }
