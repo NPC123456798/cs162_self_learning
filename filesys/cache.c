@@ -27,6 +27,7 @@ void cache_init(void) {
         b->accessed = false;
         b->ref_cnt = 0;
         b->loading = false;
+        b->writing_back = false;
         list_push_back(&cache_list, &b->elem); // push all cache block into list
     }
     clock_hand = list_begin(&cache_list);
@@ -46,6 +47,7 @@ static struct cache_block* cache_lookup_locked(block_sector_t sector) {
     return NULL;
 }
 
+/* locked means if you call it you should let it in cache lock's protection */
 static struct cache_block* cache_evict_locked(void) {
     ASSERT(lock_held_by_current_thread(&cache_lock));
 
@@ -75,6 +77,12 @@ struct cache_block* cache_get_block(block_sector_t sector, bool exclusive) {
     // 1. try to hit, searching
     struct cache_block* b = cache_lookup_locked(sector);
     if (b != NULL) {
+        if (exclusive) {
+        // writer must wait flush write back finish 
+            while (b->writing_back) {
+                cond_wait(&b->waiters, &cache_lock);
+            }
+        }
         b->ref_cnt++; // must under cache lock's protection
         // get block lock(read write lock) 
         rw_lock_acquire(&b->rw_lock, exclusive ? RW_WRITER : RW_READER);
@@ -143,4 +151,33 @@ void cache_release_block(struct cache_block* b, bool exclusive) {
     }
     lock_release(&cache_lock);
     
+}
+
+void cache_mark_dirty(struct cache_block* b) {
+    lock_acquire(&cache_lock);
+    b->dirty = true;
+    lock_release(&cache_lock);
+}
+
+// cache_flush implementation
+void cache_flush(void) {
+    lock_acquire(&cache_lock);
+    for (int i = 0; i < CACHE_SIZE; i++) {
+        struct cache_block* b = &cache[i];
+        if (b->valid && b->dirty && b->ref_cnt == 0 && !b->writing_back) {
+            b->ref_cnt++;
+            b->writing_back = true;
+            block_sector_t sector = b->sector;
+            lock_release(&cache_lock);
+
+            block_write(fs_device, sector, b->data);
+
+            lock_acquire(&cache_lock);
+            b->ref_cnt--;
+            b->writing_back = false;
+            b->dirty = false;
+            cond_broadcast(&b->waiters, &cache_lock); // wake up waiters of writer 
+        }
+    }
+    lock_release(&cache_lock);
 }
