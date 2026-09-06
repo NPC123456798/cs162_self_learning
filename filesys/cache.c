@@ -7,7 +7,8 @@
 
 static struct cache_block cache[CACHE_SIZE];
 static struct list cache_list; // store all stored cache block in list
-static struct lock cache_lock;
+/* protect all cache blocks' meta data change */
+static struct lock cache_lock; 
 static struct list_elem* clock_hand;
 static struct condition cache_block_freed;
 
@@ -79,13 +80,6 @@ struct cache_block* cache_get_block(block_sector_t sector, bool exclusive) {
         rw_lock_acquire(&b->rw_lock, exclusive ? RW_WRITER : RW_READER);
         lock_release(&cache_lock);
 
-        // if block is loading waiting until loading finish 
-        // TODO: maybe can be removed because valid loading set at same time and cache search operation is mutual exclusion with flags set 
-        lock_acquire(&b->state_lock);
-        while (b->loading) {
-            cond_wait(&b->waiters, &b->state_lock);
-        }
-        lock_release(&b->state_lock);
         return b;
     }
 
@@ -128,7 +122,7 @@ struct cache_block* cache_get_block(block_sector_t sector, bool exclusive) {
     b->loading = false;
     lock_release(&cache_lock);
 
-    cond_broadcast(&b->waiters, &b->state_lock);   // awake up all threads waiting this block 
+\
 
     // 6. get rwlock by exclusive and then return 
     rw_lock_acquire(&b->rw_lock, exclusive ? RW_WRITER : RW_READER);
