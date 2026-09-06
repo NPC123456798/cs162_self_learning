@@ -64,9 +64,11 @@ static struct cache_block* cache_evict_locked(void) {
     PANIC("No evictable cache block");
 }
 struct cache_block* cache_get_block(block_sector_t sector, bool exclusive) {
+    // this is necessary for avoiding situation of searching sector but the block's sector state is changed by the next eviction logic 
+    // for search evicted block and cache hit block so  searching and block state change operation must in the same global cache lock protection.
     lock_acquire(&cache_lock);
 
-    // 1. try to hit 
+    // 1. try to hit, searching
     struct cache_block* b = cache_lookup_locked(sector);
     if (b != NULL) {
         b->ref_cnt++;
@@ -83,13 +85,13 @@ struct cache_block* cache_get_block(block_sector_t sector, bool exclusive) {
         return b;
     }
 
-    // 2. not hit and select a evicted block 
+    // 2. not hit and select a evicted block, searching
     b = cache_evict_locked();
     // keep old sector number used in write back 
     block_sector_t old_sector = b->sector;
     bool old_dirty = b->dirty;
 
-    // update block information in the cache_lock's protection  
+    // update block information in the cache_lock's protection  , state change
     b->sector = sector;
     b->valid = false;
     b->loading = true;
@@ -98,7 +100,8 @@ struct cache_block* cache_get_block(block_sector_t sector, bool exclusive) {
     b->accessed = true;         // loaded block is thought as accessed at recent 
 
 
-    // release cache lock because write back and read is protected by loading flag and ref_cnt
+    // release cache lock because write back and read is protected by loading flag and ref_cnt.
+    // also because searching and state change operation is finished in one thread
     lock_release(&cache_lock);
 
     // 3. if evicted block is dirty write back data at first 
