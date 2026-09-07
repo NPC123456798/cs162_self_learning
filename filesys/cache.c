@@ -1,9 +1,12 @@
 #include "filesys/cache.h"
 #include "threads/malloc.h"
 #include "filesys/filesys.h"
+#include "threads/thread.h"
 #include <debug.h>
 
 #define CACHE_SIZE 64
+
+#define FLUSH_INTERVAL 50 // 2 seconds
 
 static struct cache_block cache[CACHE_SIZE];
 static struct list cache_list; // store all stored cache block in list
@@ -11,6 +14,13 @@ static struct list cache_list; // store all stored cache block in list
 static struct lock cache_lock; 
 static struct list_elem* clock_hand;
 static struct condition cache_block_freed;
+
+static void cache_flush_thread(void* aux UNUSED) {
+    while (true) {
+        timer_sleep(FLUSH_INTERVAL);   //  flush time
+        cache_flush();
+    }
+}
 
 void cache_init(void) {
     lock_init(&cache_lock);
@@ -31,6 +41,7 @@ void cache_init(void) {
         list_push_back(&cache_list, &b->elem); // push all cache block into list
     }
     clock_hand = list_begin(&cache_list);
+    tid_t tid = thread_create("cache-flush", PRI_DEFAULT, cache_flush_thread, NULL);
 }
 
 
