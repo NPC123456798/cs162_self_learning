@@ -6,7 +6,7 @@
 
 #define CACHE_SIZE 64
 
-#define FLUSH_INTERVAL 50 // 2 seconds
+#define FLUSH_INTERVAL 200 // 2 seconds
 
 static struct cache_block cache[CACHE_SIZE];
 static struct list cache_list; // store all stored cache block in list
@@ -60,9 +60,23 @@ static struct cache_block* cache_lookup_locked(block_sector_t sector) {
 
 /* locked means if you call it you should let it in cache lock's protection */
 static struct cache_block* cache_evict_locked(void) {
+    // cache lock promise all cache block'meta data change is exclusion when you has this lock
     ASSERT(lock_held_by_current_thread(&cache_lock));
 
+/* 1. check if exist expendable block(ref_cnt == 0) */
+    bool found_free = false;
     for (int i = 0; i < CACHE_SIZE; i++) {
+        if (cache[i].ref_cnt == 0) {
+            found_free = true;
+            break;
+        }
+    }
+    if (!found_free) {
+        return NULL;   /* all block is in using and can't evict  */
+    }
+
+    /* 2. exist free block running clock algorithm until find one block  */
+    while (true) {
         struct cache_block* b = list_entry(clock_hand, struct cache_block, elem);
         clock_hand = list_next(clock_hand);
         if (clock_hand == list_end(&cache_list))
@@ -70,13 +84,12 @@ static struct cache_block* cache_evict_locked(void) {
 
         if (b->ref_cnt == 0) {
             if (b->accessed) {
-                b->accessed = false;   // give second chance
+                b->accessed = false;   // give second chance and continue scan  
             } else {
-                return b;
+                return b;              // select block
             }
         }
     }
-    return NULL; // without can be evicted  block
 }
 
 
@@ -94,6 +107,8 @@ struct cache_block* cache_get_block(block_sector_t sector, bool exclusive) {
                 cond_wait(&b->waiters, &cache_lock);
             }
         }
+        b->accessed = true; // if hit should let it be true which means the block has been accessed at recent, without it the 
+        // clock algorithm will always find block to evict even its a important block
         b->ref_cnt++; // must under cache lock's protection
         // get block lock(read write lock) 
         rw_lock_acquire(&b->rw_lock, exclusive ? RW_WRITER : RW_READER);
