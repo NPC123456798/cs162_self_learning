@@ -67,7 +67,6 @@ static void syscall_handler(struct intr_frame*);
 
 void syscall_init(void) { 
     intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall");
-    lock_init(&filesys_lock);
     lock_init(&table_lock);
 }
 
@@ -395,9 +394,9 @@ static void sys_create(struct intr_frame* f, uint32_t* args) {
     }
     unsigned initial_size = (unsigned)args[2];
     
-    lock_acquire(&filesys_lock);
+
     bool ok = filesys_create(file, initial_size);
-    lock_release(&filesys_lock);
+
     f->eax = ok;
 
 }
@@ -424,9 +423,9 @@ static void sys_remove(struct intr_frame* f, uint32_t* args) {
         process_exit(-1);
     }
 
-    lock_acquire(&filesys_lock);
+
     bool ok = filesys_remove(file);
-    lock_release(&filesys_lock);
+
 
     f->eax = ok;
 
@@ -445,10 +444,10 @@ static void sys_open(struct intr_frame* f, uint32_t* args) {
         process_exit(-1);
     }
 
-    lock_acquire(&filesys_lock);
+
     struct file *f_ptr = filesys_open(file);
     if (f_ptr == NULL) {
-        lock_release(&filesys_lock);
+
         f->eax = -1;
         return;
     }
@@ -471,7 +470,7 @@ static void sys_open(struct intr_frame* f, uint32_t* args) {
     } else {
         f->eax = fd;
     }
-    lock_release(&filesys_lock);
+
 
 
 }
@@ -493,9 +492,8 @@ static void sys_filesize(struct intr_frame* f, uint32_t* args){
         return;
     }
     
-    lock_acquire(&filesys_lock);
     off_t file_size = file_length(pcb->files[fd]);
-    lock_release(&filesys_lock);
+
     f->eax = file_size;
 }
 
@@ -555,10 +553,10 @@ static void sys_read(struct intr_frame* f, uint32_t* args){
     } else if (fd < 0 || fd >= MAX_FILES || pcb->files[fd] == NULL) {
         f->eax = -1;
     } else {
-        lock_acquire(&filesys_lock);
+
         // record change for sample.txt
         off_t bytes = file_read(pcb->files[fd], buffer, (off_t) read_size);
-        lock_release(&filesys_lock);
+
         f->eax = bytes;
     }
 }
@@ -594,9 +592,9 @@ static void sys_write(struct intr_frame* f, uint32_t* args){
     } else if (fd < 0 || fd >= MAX_FILES || pcb->files[fd] == NULL) {
         f->eax = -1;
     } else {
-        lock_acquire(&filesys_lock);
+
         off_t bytes = file_write(pcb->files[fd], buffer, write_size);
-        lock_release(&filesys_lock);
+
         f->eax = bytes;
     }
 }
@@ -623,9 +621,9 @@ static void sys_seek(struct intr_frame* f UNUSED, uint32_t* args) {
         return;
     }
     
-    lock_acquire(&filesys_lock);
+
     file_seek(pcb->files[fd], position);
-    lock_release(&filesys_lock);
+
 }
 
 
@@ -644,9 +642,9 @@ static void sys_tell(struct intr_frame* f, uint32_t* args) {
         return;
     }
     
-    lock_acquire(&filesys_lock);
+
     off_t pos = file_tell(pcb->files[fd]);
-    lock_release(&filesys_lock);
+
     f->eax = pos;
 }
 
@@ -667,10 +665,10 @@ static void sys_close(struct intr_frame* f, uint32_t* args) {
         return;
     }
     
-    lock_acquire(&filesys_lock);
+
     file_close(pcb->files[fd]);
     pcb->files[fd] = NULL;
-    lock_release(&filesys_lock);
+
 }
 
 

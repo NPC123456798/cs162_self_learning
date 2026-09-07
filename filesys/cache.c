@@ -141,7 +141,9 @@ struct cache_block* cache_get_block(block_sector_t sector, bool exclusive) {
     // also because searching and state change operation is finished in one thread
     lock_release(&cache_lock);
 
-    // 3. if evicted block is dirty write back data at first 
+    // 3. if evicted block is dirty write back data at first, actually this operation should
+    // in  the duration of  eviction but here what protect this operation is the loading flag instead of
+    //  something about is evicting flag, it just means we let the write back also inside loading 
     if (old_dirty) {
         block_write(fs_device, old_sector, b->data);
     }

@@ -242,9 +242,9 @@ static void start_process(void* info_) {
     if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
     if_.cs = SEL_UCSEG;
     if_.eflags = FLAG_IF | FLAG_MBS;
-    lock_acquire(&filesys_lock);
+  
     success = load(token, &if_.eip, &if_.esp);
-    lock_release(&filesys_lock);
+
     // here is decided by setup_stack
     t->user_stack_page = ((uint8_t*)PHYS_BASE) - PGSIZE;
   }
@@ -523,7 +523,6 @@ void process_exit(int status) {
 
 
 
-  lock_acquire(&filesys_lock);
 
   for (int fd = 2; fd < MAX_FILES; fd++) {
       if (pcb->files[fd] != NULL) {
@@ -538,7 +537,7 @@ void process_exit(int status) {
   }  
 
 
-  lock_release(&filesys_lock);
+
 
 
 
@@ -711,7 +710,6 @@ pid_t process_fork(struct intr_frame *parent_if) {
     child_pcb->exit_code = -1;
 
 
-    lock_acquire(&filesys_lock);
     // here is fork's copy from parent to child in file description
     // use file_dup to copy file pointer and add file's ref_cnt and inode's open_cnt
     // add open cnt to express more file open this inode, add ref_cnt express more process or thread open this file
@@ -740,7 +738,6 @@ pid_t process_fork(struct intr_frame *parent_if) {
         child_pcb->exec_file = NULL;
     }
 
-    lock_release(&filesys_lock);
 
     // 4. construct parent child relationship
     struct child *child = malloc(sizeof *child);
