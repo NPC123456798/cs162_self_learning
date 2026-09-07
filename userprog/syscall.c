@@ -31,7 +31,7 @@ struct user_sema_entry {
 
 static struct user_sema_entry sema_table[MAX_USER_SEMAS];
 
-struct lock filesys_lock;   // protect file system operation global lock
+
 
 static bool verify_user_range(const void *uaddr, size_t size);
 static bool verify_user_string(const char *str);

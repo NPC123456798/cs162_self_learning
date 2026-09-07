@@ -34,6 +34,8 @@ struct inode {
   int deny_write_cnt;     /* 0: writes ok, >0: deny writes. */
   off_t length;
   block_sector_t start;
+  bool loading;
+  struct condition waiters;
 };
 
 /* Returns the block device sector that contains byte offset POS
@@ -51,9 +53,13 @@ static block_sector_t byte_to_sector(const struct inode* inode, off_t pos) {
 /* List of open inodes, so that opening a single inode twice
    returns the same `struct inode'. */
 static struct list open_inodes;
+static struct lock inode_list_lock;
 
 /* Initializes the inode module. */
-void inode_init(void) { list_init(&open_inodes); }
+void inode_init(void) { 
+  list_init(&open_inodes);
+  lock_init(&inode_list_lock);
+}
 
 /* Initializes an inode with LENGTH bytes of data and
    writes the new inode to sector SECTOR on the file system
@@ -105,26 +111,41 @@ struct inode* inode_open(block_sector_t sector) {
   struct list_elem* e;
   struct inode* inode;
 
+  lock_acquire(&inode_list_lock);
+
   /* Check whether this inode is already open. */
   for (e = list_begin(&open_inodes); e != list_end(&open_inodes); e = list_next(e)) {
     inode = list_entry(e, struct inode, elem);
     if (inode->sector == sector) {
-      inode_reopen(inode);
+       /* if is loading wait it finished  */
+      while (inode->loading) {
+          cond_wait(&inode->waiters, &inode_list_lock);
+      }
+      /* reopen operation */
+      inode->open_cnt++;
+      lock_release(&inode_list_lock);
       return inode;
     }
   }
 
   /* Allocate memory. */
   inode = malloc(sizeof *inode);
-  if (inode == NULL)
+  if (inode == NULL) {
+    lock_release(&inode_list_lock);
     return NULL;
+  }
 
   /* Initialize. */
-  list_push_front(&open_inodes, &inode->elem);
+  cond_init(&inode->waiters);
   inode->sector = sector;
   inode->open_cnt = 1;
   inode->deny_write_cnt = 0;
   inode->removed = false;
+  inode->loading = true;
+
+  list_push_front(&open_inodes, &inode->elem);
+  lock_release(&inode_list_lock);
+
 
   /* read  inode meta data by accessing cache */
   struct inode_disk *disk_inode;
@@ -135,6 +156,11 @@ struct inode* inode_open(block_sector_t sector) {
   inode->start = disk_inode->start;
   cache_release_block(b, RW_READER);
 
+  /* regain lock and mark load finished also waking up waiters  */
+  lock_acquire(&inode_list_lock);
+  inode->loading = false;
+  cond_broadcast(&inode->waiters, &inode_list_lock);
+  lock_release(&inode_list_lock);
 
   
   return inode;
@@ -142,8 +168,13 @@ struct inode* inode_open(block_sector_t sector) {
 
 /* Reopens and returns INODE. */
 struct inode* inode_reopen(struct inode* inode) {
-  if (inode != NULL)
+  if (inode != NULL) {
+    lock_acquire(&inode_list_lock);
+
     inode->open_cnt++;
+
+    lock_release(&inode_list_lock);
+  }
   return inode;
 }
 
@@ -158,13 +189,21 @@ void inode_close(struct inode* inode) {
   if (inode == NULL)
     return;
 
-  /* Release resources if this was the last opener. */
-  if (--inode->open_cnt == 0) {
-    /* Remove from inode list and release lock. */
-    list_remove(&inode->elem);
+  lock_acquire(&inode_list_lock);
+  bool last = (--inode->open_cnt == 0);
 
+  /* Remove from inode list and release lock. */
+  if (last) {
+    list_remove(&inode->elem);
+  }
+
+  bool should_free_blocks = (last && inode->removed);
+  lock_release(&inode_list_lock);
+
+  /* Release resources if this was the last opener. */
+  if (last) {
     /* Deallocate blocks if removed. */
-    if (inode->removed) {
+    if (should_free_blocks) {
       free_map_release(inode->sector, 1);
       free_map_release(inode->start, bytes_to_sectors(inode->length));
     }
@@ -177,7 +216,9 @@ void inode_close(struct inode* inode) {
    has it open. */
 void inode_remove(struct inode* inode) {
   ASSERT(inode != NULL);
+  lock_acquire(&inode_list_lock);
   inode->removed = true;
+  lock_release(&inode_list_lock);
 }
 
 
