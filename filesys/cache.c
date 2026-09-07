@@ -10,7 +10,7 @@
 
 static struct cache_block cache[CACHE_SIZE];
 static struct list cache_list; // store all stored cache block in list
-/* protect all cache blocks' meta data change */
+/* protect all cache blocks' meta data modify */
 static struct lock cache_lock; 
 static struct list_elem* clock_hand;
 static struct condition cache_block_freed;
