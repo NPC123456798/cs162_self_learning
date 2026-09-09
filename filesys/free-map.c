@@ -4,9 +4,11 @@
 #include "filesys/file.h"
 #include "filesys/filesys.h"
 #include "filesys/inode.h"
+#include "threads/synch.h"
 
 static struct file* free_map_file; /* Free map file. */
 static struct bitmap* free_map;    /* Free map, one bit per sector. */
+static struct lock free_map_lock;
 
 /* Initializes the free map. */
 void free_map_init(void) {
@@ -15,6 +17,7 @@ void free_map_init(void) {
     PANIC("bitmap creation failed--file system device is too large");
   bitmap_mark(free_map, FREE_MAP_SECTOR);
   bitmap_mark(free_map, ROOT_DIR_SECTOR);
+  lock_init(&free_map_lock);
 }
 
 /* Allocates CNT consecutive sectors from the free map and stores
@@ -23,7 +26,15 @@ void free_map_init(void) {
    sectors were available or if the free_map file could not be
    written. */
 bool free_map_allocate(size_t cnt, block_sector_t* sectorp) {
+  /* bitmap set should be exclusive because its shared resource or you will get situation that
+  multiple files share same sector and modify one file make multiple file's content change */
+  lock_acquire(&free_map_lock);
   block_sector_t sector = bitmap_scan_and_flip(free_map, 0, cnt, false);
+  lock_release(&free_map_lock);
+
+  /* here write back into disk doesn't need global lock protect because cache buffer
+  has its fine-grained lock to protect same sector one time only one thread write it and 
+  different sector multiple threads write at same time doesn't be a problem */
   if (sector != BITMAP_ERROR && free_map_file != NULL && !bitmap_write(free_map, free_map_file)) {
     bitmap_set_multiple(free_map, sector, cnt, false);
     sector = BITMAP_ERROR;
@@ -36,7 +47,11 @@ bool free_map_allocate(size_t cnt, block_sector_t* sectorp) {
 /* Makes CNT sectors starting at SECTOR available for use. */
 void free_map_release(block_sector_t sector, size_t cnt) {
   ASSERT(bitmap_all(free_map, sector, cnt));
+  // same reason with upon
+  lock_acquire(&free_map_lock);
   bitmap_set_multiple(free_map, sector, cnt, false);
+  lock_release(&free_map_lock);
+
   bitmap_write(free_map, free_map_file);
 }
 

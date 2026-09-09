@@ -392,17 +392,17 @@ static void inode_release_block_at(struct inode_block_pointers *bp, off_t block_
    Returns true if successful.
    Returns false if memory or disk allocation fails. */
 bool inode_create(block_sector_t sector, off_t length) {
-  struct inode_disk* disk_inode = NULL;
+    struct inode_disk* disk_inode = NULL;
 
-  ASSERT(length >= 0);
+    ASSERT(length >= 0);
 
-  /* If this assertion fails, the inode structure is not exactly
-     one sector in size, and you should fix that. */
-  ASSERT(sizeof *disk_inode == BLOCK_SECTOR_SIZE);
+    /* If this assertion fails, the inode structure is not exactly
+        one sector in size, and you should fix that. */
+    ASSERT(sizeof *disk_inode == BLOCK_SECTOR_SIZE);
 
-  disk_inode = calloc(1, sizeof *disk_inode);
-  if (disk_inode == NULL)
-        return false;
+    disk_inode = calloc(1, sizeof *disk_inode);
+    if (disk_inode == NULL)
+            return false;
 
     /* initialize  inode meta data */
     disk_inode->length = length;
@@ -555,6 +555,7 @@ void inode_close(struct inode* inode) {
   bool should_free_blocks = (last && inode->removed);
   lock_release(&inode_list_lock);
 
+  rw_lock_acquire(&inode->inode_lock, RW_WRITER);
   /* Release resources if this was the last opener. */
   if (last) {
     /* Deallocate blocks if removed. */
@@ -562,7 +563,7 @@ void inode_close(struct inode* inode) {
         inode_free_blocks(&inode->block_ptrs);
         free_map_release(inode->sector, 1);
     }
-
+    rw_lock_release(&inode->inode_lock, RW_WRITER);
     free(inode);
   }
 }
@@ -691,6 +692,13 @@ off_t inode_write_at(struct inode* inode, const void* buffer_, off_t size, off_t
     int chunk_size = size < min_left ? size : min_left;
     if (chunk_size <= 0)
       break;
+
+
+    if (sector_idx < 0)
+    {
+        break;
+    }
+    
 
     /* get write cache block (which will automatically load old
       data or keep cache content) modify it and mark dirty   */
