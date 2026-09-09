@@ -504,11 +504,7 @@ struct inode* inode_open(block_sector_t sector) {
   disk_inode = (struct inode_disk *)&b->data;
 
   inode->length = disk_inode->length;
-  for (int i = 0; i < DIRECT_BLOCK_COUNT; i++) {
-    inode->block_ptrs.direct[i] = disk_inode->inode_pointers.direct[i];
-  }
-  inode->block_ptrs.double_indirect = disk_inode->inode_pointers.direct;
-  inode->block_ptrs.double_indirect = disk_inode->inode_pointers.double_indirect;
+  inode->block_ptrs = disk_inode->inode_pointers;
   cache_release_block(b, RW_READER);
 
   /* regain lock and mark load finished also waking up waiters  */
@@ -694,7 +690,7 @@ off_t inode_write_at(struct inode* inode, const void* buffer_, off_t size, off_t
       break;
 
 
-    if (sector_idx < 0)
+    if (sector_idx == INVALID_SECTOR)
     {
         break;
     }

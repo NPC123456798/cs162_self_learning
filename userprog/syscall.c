@@ -10,6 +10,7 @@
 #include "filesys/filesys.h"
 #include "lib/kernel/console.h"
 #include "devices/input.h"
+#include "filesys/inode.h"
 
 #define MAX_USER_LOCKS 256
 #define MAX_USER_SEMAS 256
@@ -61,7 +62,7 @@ static void sys_sema_init(struct intr_frame* f, uint32_t* args);
 static void sys_sema_down(struct intr_frame* f, uint32_t* args);
 static void sys_sema_up(struct intr_frame* f, uint32_t* args);
 static void sys_get_tid(struct intr_frame* f, uint32_t* args);
-
+static void sys_inumber(struct intr_frame* f, uint32_t* args);
 
 static void syscall_handler(struct intr_frame*);
 
@@ -211,7 +212,9 @@ static void syscall_handler(struct intr_frame* f ) {
         sys_get_tid(f,args);
         break;
 
-
+    case SYS_INUMBER:
+        sys_inumber(f,args);
+        break;
 
 
 
@@ -1043,7 +1046,23 @@ static void sys_get_tid(struct intr_frame* f, uint32_t* args) {
     return;
 }
 
-
+static void sys_inumber(struct intr_frame* f, uint32_t* args) {
+     // verify fd 
+    if (!verify_user_range(&args[1], sizeof(int))) {
+        process_exit(-1);
+    }
+    int fd = args[1];
+    struct thread *cur = thread_current();
+    struct process *pcb = cur->pcb;
+    
+    // check fd validation 
+    if (fd < 0 || fd >= MAX_FILES || pcb->files[fd] == NULL) {
+        f->eax = -1;
+        return;
+    }
+    f->eax = inode_get_inumber(file_get_inode(pcb->files[fd]));
+    return;
+}
 
 
 
