@@ -52,7 +52,7 @@ struct inode {
   int deny_write_cnt;     /* 0: writes ok, >0: deny writes. */
   off_t length;
   struct inode_block_pointers block_ptrs;    /* cached  block pointers  */
-  struct lock inode_lock;                     /* protect length and block pointer */
+  struct rw_lock inode_lock;                     /* protect length and block pointer */
   bool loading;
   struct condition waiters;
 };
@@ -277,6 +277,115 @@ static void inode_free_blocks(struct inode_block_pointers *disk_inode) {
 }
 
 
+static void inode_release_block_at(struct inode_block_pointers *bp, off_t block_idx) {
+    block_sector_t sec = INVALID_SECTOR;
+
+    if (block_idx < 0)
+    {
+        return;
+    }
+    
+
+    if (block_idx < DIRECT_BLOCK_COUNT) {
+        sec = bp->direct[block_idx];
+        bp->direct[block_idx] = INVALID_SECTOR;
+        if (sec != INVALID_SECTOR)
+            free_map_release(sec, 1);
+        return;
+    }
+
+    block_idx -= DIRECT_BLOCK_COUNT;
+
+    if (block_idx < INDIRECT_BLOCK_ENTRIES) {
+        if (bp->indirect == INVALID_SECTOR)
+            return;
+        struct cache_block *ib = cache_get_block(bp->indirect, RW_WRITER);
+        block_sector_t *entries = (block_sector_t *)ib->data;
+        sec = entries[block_idx];
+        entries[block_idx] = INVALID_SECTOR;
+
+        // check indirect block if all entries invalid 
+        bool empty = true;
+        for (int i = 0; i < INDIRECT_BLOCK_ENTRIES; i++) {
+            if (entries[i] != INVALID_SECTOR) {
+                empty = false;
+                break;
+            }
+        }
+        cache_mark_dirty(ib);
+        cache_release_block(ib, RW_WRITER);
+
+        if (sec != INVALID_SECTOR)
+            free_map_release(sec, 1);
+
+        if (empty && bp->indirect != INVALID_SECTOR) {
+            free_map_release(bp->indirect, 1);
+            bp->indirect = INVALID_SECTOR;
+        }
+        return;
+    }
+
+    block_idx -= INDIRECT_BLOCK_ENTRIES;
+
+    size_t dbl_idx = block_idx / INDIRECT_BLOCK_ENTRIES;
+    size_t ind_idx = block_idx % INDIRECT_BLOCK_ENTRIES;
+
+    if (bp->double_indirect == INVALID_SECTOR)
+        return;
+
+    struct cache_block *db = cache_get_block(bp->double_indirect, RW_WRITER);
+    block_sector_t *dbl_entries = (block_sector_t *)db->data;
+    block_sector_t ind_sector = dbl_entries[dbl_idx];
+    cache_release_block(db, RW_WRITER);
+
+    if (ind_sector == INVALID_SECTOR) {
+        return;
+    }
+
+    struct cache_block *ib = cache_get_block(ind_sector, RW_WRITER);
+    block_sector_t *ind_entries = (block_sector_t *)ib->data;
+    sec = ind_entries[ind_idx];
+    ind_entries[ind_idx] = INVALID_SECTOR;
+
+    // check indirect block if empty 
+    bool empty = true;
+    for (int i = 0; i < INDIRECT_BLOCK_ENTRIES; i++) {
+        if (ind_entries[i] != INVALID_SECTOR) {
+            empty = false;
+            break;
+        }
+    }
+    cache_mark_dirty(ib);
+    cache_release_block(ib, RW_WRITER);
+
+    if (sec != INVALID_SECTOR)
+        free_map_release(sec, 1);
+
+    if (empty) {
+        free_map_release(ind_sector, 1);
+        bool db_empty = true;
+        // update double indirect block's entry
+        db = cache_get_block(bp->double_indirect, RW_WRITER);
+        dbl_entries = (block_sector_t *)db->data;
+        dbl_entries[dbl_idx] = INVALID_SECTOR;
+        // check if double indirect block empty 
+        for (int i = 0; i < INDIRECT_BLOCK_ENTRIES; i++) {
+            if (dbl_entries[i] != INVALID_SECTOR) {
+                db_empty = false;
+                break;
+            }
+        }
+        cache_mark_dirty(db);
+        cache_release_block(db, RW_WRITER);
+
+        if (db_empty) {
+            free_map_release(bp->double_indirect, 1);
+            bp->double_indirect = INVALID_SECTOR;
+        }
+    }
+}
+
+
 /* Initializes an inode with LENGTH bytes of data and
    writes the new inode to sector SECTOR on the file system
    device.
@@ -377,7 +486,7 @@ struct inode* inode_open(block_sector_t sector) {
   }
 
   /* Initialize. */
-  lock_init(&inode->inode_lock);
+  rw_lock_init(&inode->inode_lock);
   cond_init(&inode->waiters);
   inode->sector = sector;
   inode->open_cnt = 1;
@@ -476,7 +585,7 @@ off_t inode_read_at(struct inode* inode, void* buffer_, off_t size, off_t offset
   uint8_t* buffer = buffer_;
   off_t bytes_read = 0;
 
-  lock_acquire(&inode->inode_lock);
+  rw_lock_acquire(&inode->inode_lock, RW_READER);
   while (size > 0) {
     /* Disk sector to read, starting byte offset within sector. */
     block_sector_t sector_idx = inode_get_data_sector(&inode->block_ptrs, byte_to_sector(inode, offset));
@@ -507,7 +616,7 @@ off_t inode_read_at(struct inode* inode, void* buffer_, off_t size, off_t offset
     offset += chunk_size;
     bytes_read += chunk_size;
   }
-  lock_release(&inode->inode_lock);
+  rw_lock_release(&inode->inode_lock, RW_READER);
   return bytes_read;
 }
 
@@ -515,19 +624,22 @@ off_t inode_read_at(struct inode* inode, void* buffer_, off_t size, off_t offset
 
 static bool inode_extend(struct inode *inode, off_t new_length) {
     // caller must has  inode->inode_lock
-    ASSERT(lock_held_by_current_thread(inode->inode_lock.holder ) == true);
     if (new_length <= inode->length) return true;
 
     off_t old_blocks = bytes_to_sectors(inode->length);
     off_t new_blocks = bytes_to_sectors(new_length);
 
+    off_t allocated = old_blocks;  // successfully allocated blocks' number  
+
     for (off_t i = old_blocks; i < new_blocks; i++) {
         if (!inode_allocate_block(&inode->block_ptrs, i)) {
-            // allocation fail and roll back allocated blocks 
-            // TODO: now we just let all blocks cleared, its not good, next we need let the extended blocks roll back
-            inode_free_blocks(&inode->block_ptrs);
+            // free allocated blocks in this loop 
+            for (off_t j = old_blocks; j < allocated; j++) {
+                inode_release_block_at(&inode->block_ptrs, j);
+            }
             return false;
         }
+        allocated++;
     }
 
     inode->length = new_length;
@@ -555,12 +667,12 @@ off_t inode_write_at(struct inode* inode, const void* buffer_, off_t size, off_t
 
   if (inode->deny_write_cnt)
     return 0;
-  lock_acquire(&inode->inode_lock);
+  rw_lock_acquire(&inode->inode_lock, RW_WRITER);
 
     // if write will beyond the file end, extend it first 
   if (offset + size > inode->length) {
     if (!inode_extend(inode, offset + size)) {
-        lock_release(&inode->inode_lock);
+        rw_lock_release(&inode->inode_lock, RW_WRITER);
         return 0;   // extend fail return 0  
     }
   }
@@ -595,7 +707,7 @@ off_t inode_write_at(struct inode* inode, const void* buffer_, off_t size, off_t
   }
 
 
-  lock_release(&inode->inode_lock);
+  rw_lock_release(&inode->inode_lock, RW_WRITER);
   return bytes_written;
 }
 
