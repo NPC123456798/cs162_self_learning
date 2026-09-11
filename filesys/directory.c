@@ -207,3 +207,16 @@ bool dir_readdir(struct dir* dir, char name[NAME_MAX + 1]) {
   }
   return false;
 }
+
+
+void dir_seek(struct dir * dir, off_t new_pos) {
+  ASSERT(dir != NULL);
+  ASSERT(new_pos >= 0);
+  dir->pos = new_pos;
+
+}
+
+off_t dir_tell(struct dir* file) {
+  ASSERT(file != NULL);
+  return file->pos;
+}

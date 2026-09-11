@@ -9,6 +9,7 @@
 #include "filesys/cache.h"
 #include "filesys/path.h"
 #include "threads/thread.h"
+#include "userprog/process.h"
 
 /* Partition that contains the file system. */
 struct block* fs_device;
@@ -179,6 +180,80 @@ bool filesys_remove(const char* path_name) {
   inode_close(target_inode);
   dir_close(parent_dir);
   return success;
+}
+
+
+bool filesys_mkdir(const char* dir) {
+    struct dir *parent;
+    char name[NAME_MAX + 1];
+
+    // 1. analysis path, get parent directory and final component name 
+    parent = path_to_parent_dir(dir, thread_current()->pcb->cwd, name);
+    if (parent == NULL)
+        return false;
+
+    // 2. check parent directory if exist same name entry 
+    struct inode *existing;
+    if (dir_lookup(parent, name, &existing)) {
+        inode_close(existing);
+        dir_close(parent);
+        return false;
+    }
+
+    // 3. allocate  inode sector for new directory
+    block_sector_t inode_sector;
+    if (!free_map_allocate(1, &inode_sector)) {
+        dir_close(parent);
+        return false;
+    }
+
+    // 4. create directory inode£¨is_dir = true£©
+    if (!dir_create(inode_sector, 0)) {
+        free_map_release(inode_sector, 1);
+        dir_close(parent);
+        return false;
+    }
+
+    // 5. open new directory
+    struct inode *new_inode = inode_open(inode_sector);
+    if (new_inode == NULL) {
+        free_map_release(inode_sector, 1);
+        dir_close(parent);
+        return false;
+    }
+    struct dir *new_dir = dir_open(new_inode);
+    if (new_dir == NULL) {
+        free_map_release(inode_sector, 1);
+        dir_close(parent);
+        return false;
+    }
+
+    // 6. get parent directory's inode sector number used in ".." entry
+    block_sector_t parent_sector = inode_get_inumber(dir_get_inode(parent));
+
+    // 7. add  "." and ".." in new directory
+    if (!dir_add(new_dir, ".", inode_sector) ||
+        !dir_add(new_dir, "..", parent_sector)) {
+        // add fail, roll back 
+        inode_remove(new_inode);
+        dir_close(new_dir);
+        dir_close(parent);
+        return false;
+    }
+
+    // 8. add new directory's entry in parent directory 
+    if (!dir_add(parent, name, inode_sector)) {
+        // add fail, roll back
+        inode_remove(new_inode);
+        dir_close(new_dir);
+        dir_close(parent);
+        return false;
+    }
+
+    // 9. success, close directory 
+    dir_close(new_dir);
+    dir_close(parent);
+    return true;
 }
 
 /* Formats the file system. */

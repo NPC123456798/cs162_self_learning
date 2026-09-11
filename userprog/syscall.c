@@ -11,9 +11,13 @@
 #include "lib/kernel/console.h"
 #include "devices/input.h"
 #include "filesys/inode.h"
+#include "filesys/path.h"
+
 
 #define MAX_USER_LOCKS 256
 #define MAX_USER_SEMAS 256
+#define READDIR_MAX_LEN 14
+
 
 struct user_lock_entry {
     struct lock kernel_lock;
@@ -63,6 +67,10 @@ static void sys_sema_down(struct intr_frame* f, uint32_t* args);
 static void sys_sema_up(struct intr_frame* f, uint32_t* args);
 static void sys_get_tid(struct intr_frame* f, uint32_t* args);
 static void sys_inumber(struct intr_frame* f, uint32_t* args);
+static void sys_chdir(struct intr_frame* f, uint32_t* args);
+static void sys_mkdir(struct intr_frame* f, uint32_t* args);
+static void sys_readdir(struct intr_frame* f, uint32_t* args);
+static void sys_isdir(struct intr_frame* f, uint32_t* args);
 
 static void syscall_handler(struct intr_frame*);
 
@@ -216,6 +224,21 @@ static void syscall_handler(struct intr_frame* f ) {
         sys_inumber(f,args);
         break;
 
+    case SYS_CHDIR:
+        sys_chdir(f,args);
+        break;
+
+    case SYS_MKDIR:
+        sys_mkdir(f,args);
+        break;
+
+    case SYS_READDIR:
+        sys_readdir(f,args);
+        break;
+
+    case SYS_ISDIR:
+        sys_isdir(f,args);
+        break;
 
 
     default:
@@ -1082,3 +1105,96 @@ static void sys_inumber(struct intr_frame* f, uint32_t* args) {
 
 
 
+static void sys_chdir(struct intr_frame* f, uint32_t* args) {
+    /* verify user pointer*/
+    if (!verify_user_string((char*)args[1])) {
+        process_exit(-1);
+    }
+    char* dir = (char*)args[1];
+
+    struct thread* cur = thread_current();
+    struct inode* inode = NULL;
+    if (!path_to_inode(dir, cur->pcb->cwd, &inode)) {
+        f->eax = false;
+        return;
+    }
+
+    if (!inode_is_dir(inode)) {
+        inode_close(inode);
+        f->eax = false;
+        return;
+    }
+
+    struct dir* new_cwd = dir_open(inode);   /* consume inode reference */
+    if (new_cwd == NULL) {
+        f->eax = false;
+        return;
+    }
+
+    dir_close(cur->pcb->cwd);   /* close old cwd */
+    cur->pcb->cwd = new_cwd;
+    f->eax = true;
+}
+
+static void sys_mkdir(struct intr_frame* f, uint32_t* args) {
+    if (!verify_user_string((char*)args[1])) {
+        process_exit(-1);
+    }
+    f->eax = filesys_mkdir((char*)args[1]);
+}
+
+static void sys_readdir(struct intr_frame* f, uint32_t* args) {
+     // verify fd 
+    if (!verify_user_range(&args[1], sizeof(int))) {
+        process_exit(-1);
+    }
+
+    int fd = args[1];
+    char* name = (char*)args[2];
+
+    if (!verify_user_range(name, READDIR_MAX_LEN + 1)) {
+        process_exit(-1);
+    }
+
+    struct file* file = thread_current()->pcb->files[fd];
+    if (file == NULL) {
+        f->eax = false;
+        return;
+    }
+    struct inode* inode = file_get_inode(file);
+    if (!inode_is_dir(inode)) {
+        f->eax = false;
+        return;
+    }
+
+    struct dir* dir = dir_open(inode_reopen(inode));
+    if (dir == NULL) {
+        f->eax = false;
+        return;
+    }
+    dir_seek(dir, file_tell(file));
+
+    bool ok = false;
+    char tmp[NAME_MAX + 1];
+    while (dir_readdir(dir, tmp)) {
+        if (strcmp(tmp, ".") == 0 || strcmp(tmp, "..") == 0)
+            continue;
+        strlcpy(name, tmp, READDIR_MAX_LEN + 1);
+        ok = true;
+        break;
+    }
+    file_seek(file, dir_tell(dir));
+    dir_close(dir);
+    f->eax = ok;
+}
+
+static void sys_isdir(struct intr_frame* f, uint32_t* args) {
+    // verify fd 
+    if (!verify_user_range(&args[1], sizeof(int))) {
+        process_exit(-1);
+    }
+
+    int fd = args[1];
+    struct file* file = thread_current()->pcb->files[fd];
+    f->eax = (file != NULL) && inode_is_dir(file_get_inode(file));
+}
