@@ -33,3 +33,88 @@ int get_next_part(char part[NAME_MAX + 1], const char** srcp) {
   *srcp = src;
   return 1;
 }
+
+/* path_to_parent_dir
+   analysis PATH, open parent directory and copy last segment name into  LAST_NAME¡£
+   PATH can be absolute path or (start with '/') relative path 
+   START is the start directory of relative directory (usually is cwd) 
+   success time return opened target directory's parent directory and fail time will return NULL 
+   caller be responsible for closing returned directory by using dir_close */
+struct dir* path_to_parent_dir(const char* path, struct dir* start, char last_name[NAME_MAX + 1]) {
+    if (path == NULL || start == NULL || last_name == NULL)
+        return NULL;
+
+    /*  const int the front means the p can be modified but the content of p pointing 
+    to can't be modified by using *p because it means the content of p pointing to is constant, the const after char* means the pointer p 
+    can't be modified but not means the content pointed by p can't be modified, same for all pointer type */
+    const char* p = path;
+    char part[NAME_MAX + 1];
+    char prev_part[NAME_MAX + 1];
+
+    /* make sure start directory, absolute path start with root and relative start with START  */
+    struct dir* current;
+    if (*p == '/')
+        current = dir_open_root();
+    else
+        current = dir_reopen(start);
+    if (current == NULL)
+        return NULL;
+
+    /* read first segment  */
+    int result = get_next_part(part, &p);
+    if (result != 1) {
+        dir_close(current);
+        return NULL;    /* empty path or only include  '/' */
+    }
+    strlcpy(prev_part, part, sizeof(prev_part));
+
+    /* analysis segment by segment ,prev_part is has been read last segment, part is next segment  
+       loop every time read new  part, and handle  prev_part as middleware
+       when loop end ,prev_part is last segment   */
+    while ((result = get_next_part(part, &p)) != 0) {
+        if (result == -1) {
+            /* someone component is too long  */
+            dir_close(current);
+            return NULL;
+        }
+
+        /* handle prev_part as middleware   */
+        if (strcmp(prev_part, ".") == 0) {
+            /* '.' keep cwd unchanged  */
+        } else if (strcmp(prev_part, "..") == 0) {
+            /* '..' switch to parent directory  */
+            struct inode* parent_inode;
+            if (!dir_lookup(current, "..", &parent_inode)) {
+                dir_close(current);
+                return NULL;
+            }
+            dir_close(current);
+            current = dir_open(parent_inode);   /* consume inode reference */
+            if (current == NULL)
+                return NULL;
+        } else {
+            /* normal name: go into subdirectory  */
+            struct inode* next_inode;
+            if (!dir_lookup(current, prev_part, &next_inode)) {
+                dir_close(current);
+                return NULL;
+            }
+            if (!inode_is_dir(next_inode)) {
+                inode_close(next_inode);
+                dir_close(current);
+                return NULL;
+            }
+            dir_close(current);
+            current = dir_open(next_inode);     /* consume inode reference */
+            if (current == NULL)
+                return NULL;
+        }
+
+        /* prev_part move forward */
+        strlcpy(prev_part, part, sizeof(prev_part));
+    }
+
+    /* prev_part is last segment name  */
+    strlcpy(last_name, prev_part, NAME_MAX + 1);
+    return current;
+}
