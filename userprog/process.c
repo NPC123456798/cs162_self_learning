@@ -94,9 +94,8 @@ void userprog_init(void) {
   t->pcb->exec_file = NULL;
 
   /* file system directory */
-  t->pcb->cwd = dir_open_root();
-  if (t->pcb->cwd == NULL)
-    PANIC("failed to open root directory");
+  t->pcb->cwd = NULL;
+
   
 
 
@@ -115,6 +114,13 @@ pid_t process_execute(const char* file_name) {
   
   tid_t tid;
   
+
+  struct thread *cur = thread_current();
+  if (cur->pcb->cwd == NULL){
+      cur->pcb->cwd = dir_open_root();   // now filesys_init has been executed
+      if (cur->pcb->cwd == NULL)
+        PANIC("failed to open root directory");
+  }
 
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */

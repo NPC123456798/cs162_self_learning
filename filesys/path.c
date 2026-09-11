@@ -41,7 +41,7 @@ int get_next_part(char part[NAME_MAX + 1], const char** srcp) {
    success time return opened target directory's parent directory and fail time will return NULL 
    caller be responsible for closing returned directory by using dir_close */
 struct dir* path_to_parent_dir(const char* path, struct dir* start, char last_name[NAME_MAX + 1]) {
-    if (path == NULL || start == NULL || last_name == NULL)
+    if (path == NULL ||  last_name == NULL)
         return NULL;
 
     /*  const int the front means the p can be modified but the content of p pointing 
@@ -53,7 +53,7 @@ struct dir* path_to_parent_dir(const char* path, struct dir* start, char last_na
 
     /* make sure start directory, absolute path start with root and relative start with START  */
     struct dir* current;
-    if (*p == '/')
+    if (*p == '/'  || start == NULL )
         current = dir_open_root();
     else
         current = dir_reopen(start);
