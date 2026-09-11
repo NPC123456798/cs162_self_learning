@@ -44,16 +44,56 @@ void filesys_done(void) {
    Returns true if successful, false otherwise.
    Fails if a file named NAME already exists,
    or if internal memory allocation fails. */
-bool filesys_create(const char* name, off_t initial_size) {
-  block_sector_t inode_sector = 0;
-  struct dir* dir = dir_open_root();
-  bool success = (dir != NULL && free_map_allocate(1, &inode_sector) &&
-                  inode_create(inode_sector, initial_size, false) && dir_add(dir, name, inode_sector));
-  if (!success && inode_sector != 0)
-    free_map_release(inode_sector, 1);
-  dir_close(dir);
+bool filesys_create(const char* path_name, off_t initial_size) {
+  char last_name[NAME_MAX + 1];
+  struct dir* parent = path_to_parent_dir(path_name, thread_current()->pcb->cwd, last_name);
+  if (parent == NULL)
+      return false;
 
-  return success;
+  /* refuse empty name and . and .. */
+  if (last_name[0] == '\0' ||
+      strcmp(last_name, ".") == 0 || strcmp(last_name, "..") == 0) {
+      dir_close(parent);
+      return false;
+  }
+
+  /* check same name */
+  block_sector_t existing;
+  if (dir_lookup(parent, last_name, &existing)) {
+      inode_close(inode_open(existing));  // release reference
+      dir_close(parent);
+      return false;
+  }
+
+  /* allocate inode sector */
+  block_sector_t sector;
+  if (!free_map_allocate(1, &sector)) {
+      dir_close(parent);
+      return false;
+  }
+
+  /* create inode (not directory) */
+  if (!inode_create(sector, initial_size, false)) {
+      free_map_release(sector, 1);
+      dir_close(parent);
+      return false;
+  }
+
+  /* add to parent directory */
+  if (!dir_add(parent, last_name, sector)) {
+      /* roll back:release inode and its blocks */
+      struct inode* inode = inode_open(sector);
+      if (inode != NULL) {
+          inode_remove(inode);
+          inode_close(inode);
+      }
+      free_map_release(sector, 1);
+      dir_close(parent);
+      return false;
+  }
+
+  dir_close(parent);
+  return true;
 }
 
 /* Opens the file with the given NAME.
@@ -61,13 +101,12 @@ bool filesys_create(const char* name, off_t initial_size) {
    otherwise.
    Fails if no file named NAME exists,
    or if an internal memory allocation fails. */
-struct file* filesys_open(const char* name) {
-  struct dir* dir = dir_open_root();
+struct file* filesys_open(const char* path_name) {
+  struct dir* start = thread_current()->pcb->cwd;
   struct inode* inode = NULL;
 
-  if (dir != NULL)
-    dir_lookup(dir, name, &inode);
-  dir_close(dir);
+  if (!path_to_inode(path_name, start, &inode))
+      return NULL;
 
   return file_open(inode);
 }

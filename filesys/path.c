@@ -118,3 +118,19 @@ struct dir* path_to_parent_dir(const char* path, struct dir* start, char last_na
     strlcpy(last_name, prev_part, NAME_MAX + 1);
     return current;
 }
+
+bool path_to_inode(const char* path, struct dir* start, struct inode** out) {
+    char last_name[NAME_MAX + 1];
+    struct dir* parent = path_to_parent_dir(path, start, last_name);
+    if (parent == NULL)
+        return false;
+
+    struct inode* inode = NULL;
+    bool ok = dir_lookup(parent, last_name, &inode);
+    dir_close(parent);
+
+    if (!ok)
+        return false;
+    *out = inode;
+    return true;
+}
