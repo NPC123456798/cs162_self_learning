@@ -926,6 +926,14 @@ bool load(const char* file_name, void (**eip)(void), void** esp) {
     goto done;
   }
 
+  /* refuse directory */
+  if (inode_is_dir(file_get_inode(file))) {
+      printf("load: %s: is a directory\n", file_name);
+      file_close(file);
+      file = NULL;
+      goto done;
+  }
+
   /* Read and verify executable header. */
   if (file_read(file, &ehdr, sizeof ehdr) != sizeof ehdr ||
       memcmp(ehdr.e_ident, "\177ELF\1\1\1", 7) || ehdr.e_type != 2 || ehdr.e_machine != 3 ||

@@ -30,10 +30,12 @@ struct inode_block_pointers
 struct inode_disk {
     struct inode_block_pointers inode_pointers;
     off_t length;                                /* file size(bytes)  */
+    bool is_dir;
     unsigned magic;                              /* magic number */
     /* fill into 512 bytes */
     uint32_t unused[(BLOCK_SECTOR_SIZE
                     - sizeof(struct inode_block_pointers)
+                    - sizeof(bool)
                     - sizeof(off_t)
                     - sizeof(unsigned))
                     / sizeof(uint32_t)];
@@ -50,6 +52,7 @@ struct inode {
   int open_cnt;           /* Number of openers. */
   bool removed;           /* True if deleted, false otherwise. */
   int deny_write_cnt;     /* 0: writes ok, >0: deny writes. */
+  bool is_dir;
   off_t length;
   struct inode_block_pointers block_ptrs;    /* cached  block pointers  */
   struct rw_lock inode_lock;                     /* protect length and block pointer */
@@ -391,7 +394,7 @@ static void inode_release_block_at(struct inode_block_pointers *bp, off_t block_
    device.
    Returns true if successful.
    Returns false if memory or disk allocation fails. */
-bool inode_create(block_sector_t sector, off_t length) {
+bool inode_create(block_sector_t sector, off_t length, bool is_dir) {
     struct inode_disk* disk_inode = NULL;
 
     ASSERT(length >= 0);
@@ -406,6 +409,7 @@ bool inode_create(block_sector_t sector, off_t length) {
 
     /* initialize  inode meta data */
     disk_inode->length = length;
+    disk_inode->is_dir = is_dir;
     disk_inode->magic = INODE_MAGIC;
 
     /* initialize all block pointer into invalid value */
@@ -504,6 +508,7 @@ struct inode* inode_open(block_sector_t sector) {
   disk_inode = (struct inode_disk *)&b->data;
 
   inode->length = disk_inode->length;
+  inode->is_dir = disk_inode->is_dir;
   inode->block_ptrs = disk_inode->inode_pointers;
   cache_release_block(b, RW_READER);
 
@@ -551,7 +556,6 @@ void inode_close(struct inode* inode) {
   bool should_free_blocks = (last && inode->removed);
   lock_release(&inode_list_lock);
 
-  rw_lock_acquire(&inode->inode_lock, RW_WRITER);
   /* Release resources if this was the last opener. */
   if (last) {
     /* Deallocate blocks if removed. */
@@ -559,7 +563,6 @@ void inode_close(struct inode* inode) {
         inode_free_blocks(&inode->block_ptrs);
         free_map_release(inode->sector, 1);
     }
-    rw_lock_release(&inode->inode_lock, RW_WRITER);
     free(inode);
   }
 }
@@ -733,3 +736,7 @@ void inode_allow_write(struct inode* inode) {
 
 /* Returns the length, in bytes, of INODE's data. */
 off_t inode_length(const struct inode* inode) { return inode->length; }
+
+bool inode_is_dir(const struct inode *inode) {
+    return inode->is_dir;
+}

@@ -524,6 +524,9 @@ static void sys_read(struct intr_frame* f, uint32_t* args){
         process_exit(-1);
     }
 
+   
+    
+
 
 
     if (read_size > 0) {
@@ -557,6 +560,11 @@ static void sys_read(struct intr_frame* f, uint32_t* args){
         f->eax = -1;
     } else {
 
+        if (inode_is_dir(file_get_inode(pcb->files[fd])) )
+        {
+            f->eax = -1;
+            return;
+        }
         // record change for sample.txt
         off_t bytes = file_read(pcb->files[fd], buffer, (off_t) read_size);
 
@@ -595,6 +603,13 @@ static void sys_write(struct intr_frame* f, uint32_t* args){
     } else if (fd < 0 || fd >= MAX_FILES || pcb->files[fd] == NULL) {
         f->eax = -1;
     } else {
+
+        
+        if (inode_is_dir(file_get_inode(pcb->files[fd])))
+        {
+            f->eax = -1;
+            return;
+        }
 
         off_t bytes = file_write(pcb->files[fd], buffer, write_size);
 
