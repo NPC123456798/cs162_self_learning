@@ -59,9 +59,8 @@ bool filesys_create(const char* path_name, off_t initial_size) {
   }
 
   /* check same name */
-  block_sector_t existing;
+  struct inode  *existing;
   if (dir_lookup(parent, last_name, &existing)) {
-      inode_close(inode_open(existing));  // release reference
       dir_close(parent);
       return false;
   }
@@ -148,11 +147,13 @@ bool filesys_remove(const char* path_name) {
   }
 
   /* search target in parent directory  */
-  block_sector_t target_sector;
-  if (!dir_lookup(parent_dir, last_name, &target_sector)) {
+  struct inode *target_inode;
+  if (!dir_lookup(parent_dir, last_name, &target_inode)) {
       dir_close(parent_dir);
       return false;
   }
+
+  block_sector_t target_sector = inode_get_inumber(target_inode);
 
   /* refuse delete root directory (root directory's inode sector number is ROOT_DIR_SECTOR )     */
   if (target_sector == ROOT_DIR_SECTOR) {
@@ -160,12 +161,6 @@ bool filesys_remove(const char* path_name) {
       return false;
   }
 
-  /* open target inode and check its type */
-  struct inode* target_inode = inode_open(target_sector);
-  if (target_inode == NULL) {
-      dir_close(parent_dir);
-      return false;
-  }
 
   bool success = false;
   if (inode_is_dir(target_inode)) {
