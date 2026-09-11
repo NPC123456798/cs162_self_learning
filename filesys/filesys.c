@@ -88,6 +88,18 @@ static void do_format(void) {
   free_map_create();
   if (!dir_create(ROOT_DIR_SECTOR, 16))
     PANIC("root directory creation failed");
+
+
+
+  /* add  "." and ".." for root directory, they all point to itself  */
+  struct dir *root_dir = dir_open(inode_open(ROOT_DIR_SECTOR));
+  if (root_dir == NULL)
+      PANIC("failed to open root directory for initialization");
+  if (!dir_add(root_dir, ".", ROOT_DIR_SECTOR) ||
+      !dir_add(root_dir, "..", ROOT_DIR_SECTOR))
+      PANIC("failed to add . or .. to root directory");
+  dir_close(root_dir);
+
   free_map_close();
   printf("done.\n");
 }

@@ -58,6 +58,7 @@ struct inode {
   struct rw_lock inode_lock;                     /* protect length and block pointer */
   bool loading;
   struct condition waiters;
+  struct lock dir_lock;
 };
 
 /* Returns the block device sector that contains byte offset POS
@@ -491,6 +492,7 @@ struct inode* inode_open(block_sector_t sector) {
 
   /* Initialize. */
   rw_lock_init(&inode->inode_lock);
+  lock_init(&inode->dir_lock);
   cond_init(&inode->waiters);
   inode->sector = sector;
   inode->open_cnt = 1;
@@ -739,4 +741,12 @@ off_t inode_length(const struct inode* inode) { return inode->length; }
 
 bool inode_is_dir(const struct inode *inode) {
     return inode->is_dir;
+}
+
+void inode_get_dir_lock(struct inode * inode) {
+    lock_acquire(&inode->dir_lock);
+}
+
+void inode_release_dir_lock(struct inode * inode) {
+    lock_release(&inode->dir_lock);
 }

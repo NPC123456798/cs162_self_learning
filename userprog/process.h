@@ -54,6 +54,9 @@ struct process {
    struct file *files[MAX_FILES];      
    int next_fd; 
    struct file *exec_file; 
+
+   /* used by file system*/
+   struct dir *cwd;
 };
 
 // record my understanding of abstraction for child

@@ -30,6 +30,7 @@ struct process_load_info {
   bool success;               // flag of load success
   tid_t child_tid;            // child thread's tid
   struct child *child;
+  struct dir *cwd;
 };
 
 
@@ -92,7 +93,11 @@ void userprog_init(void) {
   t->pcb->next_fd = 2; // 0, 1 for std in and out  
   t->pcb->exec_file = NULL;
 
-
+  /* file system directory */
+  t->pcb->cwd = dir_open_root();
+  if (t->pcb->cwd == NULL)
+    PANIC("failed to open root directory");
+  
 
 
 }
@@ -139,6 +144,7 @@ pid_t process_execute(const char* file_name) {
   info->child->exited = false;
   info->child->child_thread = NULL;
 
+  info->cwd = thread_current()->pcb->cwd;
 
   /* Create a new thread to execute FILE_NAME. */
 
@@ -224,6 +230,10 @@ static void start_process(void* info_) {
     }
     new_pcb->next_fd = 2; // 0, 1 for std in and out  
     new_pcb->exec_file = NULL;
+
+    /* file system  */
+    new_pcb->cwd =  dir_reopen(info->cwd);
+
   }
 
   // here start analysis the commandline just the file_name
@@ -537,6 +547,11 @@ void process_exit(int status) {
   }  
 
 
+  if (pcb->cwd != NULL)
+  {
+    dir_close(pcb->cwd);
+  }
+  
 
 
 
@@ -622,6 +637,8 @@ static void fork_child(void *aux_) {
     t->pcb->my_info_as_child = aux->child;
     aux->child->child_thread = t;
     lock_release(&child_lock);
+
+   
 
     // activate child process page dir
     process_activate();
@@ -739,9 +756,13 @@ pid_t process_fork(struct intr_frame *parent_if) {
     }
 
 
+    /* file system directory inheritance */
+    child_pcb->cwd = dir_reopen(parent_pcb->cwd);
+
     // 4. construct parent child relationship
     struct child *child = malloc(sizeof *child);
     if (child == NULL) {
+        dir_close(child_pcb->cwd);
         free(child_pcb);
         pagedir_destroy(child_pagedir);
         return TID_ERROR;
@@ -756,6 +777,7 @@ pid_t process_fork(struct intr_frame *parent_if) {
     // 5. set child process helper function
     struct fork_aux *aux = malloc(sizeof *aux);
     if (aux == NULL) {
+        dir_close(child_pcb->cwd);
         free(child);
         free(child_pcb);
         pagedir_destroy(child_pagedir);
@@ -772,6 +794,7 @@ pid_t process_fork(struct intr_frame *parent_if) {
                                     PRI_DEFAULT, fork_child, aux);
   
     if (child_tid == TID_ERROR) {
+        dir_close(child_pcb->cwd);
         free(aux);
         free(child);
         free(child_pcb);
