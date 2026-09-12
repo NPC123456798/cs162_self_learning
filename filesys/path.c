@@ -1,7 +1,8 @@
 
 #include "filesys/path.h"
-
-
+#include "filesys/filesys.h"
+#include <string.h>
+#include "filesys/inode.h"
 
 
 
@@ -60,6 +61,12 @@ struct dir* path_to_parent_dir(const char* path, struct dir* start, char last_na
     if (current == NULL)
         return NULL;
 
+    /* check the start directory if deleted  */
+    if (dir_is_removed(current)) {
+        dir_close(current);
+        return NULL;
+    }
+
     /* read first segment  */
     int result = get_next_part(part, &p);
     if (result != 1) {
@@ -92,6 +99,10 @@ struct dir* path_to_parent_dir(const char* path, struct dir* start, char last_na
             current = dir_open(parent_inode);   /* consume inode reference */
             if (current == NULL)
                 return NULL;
+            if (dir_is_removed(current)) {
+                dir_close(current);
+                return NULL;
+            }
         } else {
             /* normal name: go into subdirectory  */
             struct inode* next_inode;
@@ -108,6 +119,10 @@ struct dir* path_to_parent_dir(const char* path, struct dir* start, char last_na
             current = dir_open(next_inode);     /* consume inode reference */
             if (current == NULL)
                 return NULL;
+            if (dir_is_removed(current)) {
+                dir_close(current);
+                return NULL;
+            }
         }
 
         /* prev_part move forward */
@@ -121,9 +136,29 @@ struct dir* path_to_parent_dir(const char* path, struct dir* start, char last_na
 
 bool path_to_inode(const char* path, struct dir* start, struct inode** out) {
     char last_name[NAME_MAX + 1];
+    
+    /* check path if empty  */
+    if (path == NULL || *path == '\0') {
+        *out = NULL;
+        return false;
+    }
+
+    /* skip the leading slash, and check if pure slash path(just root directory)  */
+    const char* p = path;
+    while (*p == '/')
+        p++;
+    if (*p == '\0') {
+        /* pure slash path and return root directory  */
+        *out = inode_open(ROOT_DIR_SECTOR);
+        return *out != NULL;
+    }
+
+
     struct dir* parent = path_to_parent_dir(path, start, last_name);
     if (parent == NULL)
         return false;
+
+
 
     struct inode* inode = NULL;
     bool ok = dir_lookup(parent, last_name, &inode);

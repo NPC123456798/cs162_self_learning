@@ -32,6 +32,6 @@ bool dir_readdir(struct dir*, char name[NAME_MAX + 1]);
 /* dir position seek and tell */
 void dir_seek(struct dir * dir, off_t new_pos);
 off_t dir_tell(struct dir* file);
-
+bool dir_is_removed(struct dir * dir);
 
 #endif /* filesys/directory.h */

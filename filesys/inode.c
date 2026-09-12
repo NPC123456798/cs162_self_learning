@@ -750,3 +750,8 @@ void inode_get_dir_lock(struct inode * inode) {
 void inode_release_dir_lock(struct inode * inode) {
     lock_release(&inode->dir_lock);
 }
+
+bool inode_is_removed(struct inode * inode) {
+    ASSERT(inode != NULL);
+    return inode->removed;
+}

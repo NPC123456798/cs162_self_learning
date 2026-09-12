@@ -220,3 +220,9 @@ off_t dir_tell(struct dir* file) {
   ASSERT(file != NULL);
   return file->pos;
 }
+
+bool dir_is_removed(struct dir * dir) {
+  ASSERT(dir != NULL);
+  return inode_is_removed(dir->inode);
+  
+}
