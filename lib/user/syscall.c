@@ -157,4 +157,14 @@ void sema_up(sema_t* sema) {
 
 tid_t get_tid(void) { return syscall0(SYS_GET_TID); }
 
+void cache_reset(void) { syscall0(SYS_CACHE_RESET); }
+void cache_stats(int *hits, int *misses) {
+    syscall2(SYS_CACHE_STATS, hits, misses);
+}
+
+
+int get_write_cnt(void) {
+    return syscall0(SYS_GET_WRITE_CNT);
+}
+
 pid_t fork(void) { return syscall0(SYS_FORK); }

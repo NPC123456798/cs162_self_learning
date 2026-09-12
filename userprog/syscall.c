@@ -12,7 +12,7 @@
 #include "devices/input.h"
 #include "filesys/inode.h"
 #include "filesys/path.h"
-
+#include "filesys/cache.h"
 
 #define MAX_USER_LOCKS 256
 #define MAX_USER_SEMAS 256
@@ -71,6 +71,9 @@ static void sys_chdir(struct intr_frame* f, uint32_t* args);
 static void sys_mkdir(struct intr_frame* f, uint32_t* args);
 static void sys_readdir(struct intr_frame* f, uint32_t* args);
 static void sys_isdir(struct intr_frame* f, uint32_t* args);
+static void sys_get_write_cnt(struct intr_frame* f, uint32_t* args UNUSED);
+
+
 
 static void syscall_handler(struct intr_frame*);
 
@@ -238,6 +241,26 @@ static void syscall_handler(struct intr_frame* f ) {
 
     case SYS_ISDIR:
         sys_isdir(f,args);
+        break;
+
+    case SYS_CACHE_RESET:
+        cache_reset_stats();
+        break;
+
+    case SYS_CACHE_STATS: {
+        int *hits = (int *)args[1];
+        int *misses = (int *)args[2];
+        if (!verify_user_range(hits, sizeof(int)) ||
+            !verify_user_range(misses, sizeof(int))) {
+            process_exit(-1);
+        }
+        cache_get_stats(hits, misses);
+        break;
+    }
+    
+
+    case SYS_GET_WRITE_CNT:
+        sys_get_write_cnt(f, args);
         break;
 
 
@@ -1197,4 +1220,9 @@ static void sys_isdir(struct intr_frame* f, uint32_t* args) {
     int fd = args[1];
     struct file* file = thread_current()->pcb->files[fd];
     f->eax = (file != NULL) && inode_is_dir(file_get_inode(file));
+}
+
+
+static void sys_get_write_cnt(struct intr_frame* f, uint32_t* args UNUSED) {
+    f->eax = block_get_write_cnt(fs_device);
 }

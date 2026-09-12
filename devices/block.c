@@ -170,3 +170,9 @@ static struct block* list_elem_to_block(struct list_elem* list_elem) {
   return (list_elem != list_end(&all_blocks) ? list_entry(list_elem, struct block, list_elem)
                                              : NULL);
 }
+
+
+int block_get_write_cnt(struct block *block) {
+    ASSERT(block != NULL);
+    return block->write_cnt;
+}

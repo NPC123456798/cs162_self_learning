@@ -15,6 +15,10 @@ static struct lock cache_lock;
 static struct list_elem* clock_hand;
 static struct condition cache_block_freed;
 
+
+static int cache_hits = 0;
+static int cache_misses = 0;
+
 static void cache_flush_thread(void* aux UNUSED) {
     while (true) {
         timer_sleep(FLUSH_INTERVAL);   //  flush time
@@ -111,6 +115,7 @@ struct cache_block* cache_get_block(block_sector_t sector, bool exclusive) {
         // clock algorithm will always find block to evict even its a important block
         b->ref_cnt++; // must under cache lock's protection
         // get block lock(read write lock) 
+        cache_hits++;
         rw_lock_acquire(&b->rw_lock, exclusive ? RW_WRITER : RW_READER);
         lock_release(&cache_lock);
 
@@ -159,7 +164,7 @@ struct cache_block* cache_get_block(block_sector_t sector, bool exclusive) {
     lock_release(&cache_lock);
 
 \
-
+    cache_misses++;
     // 6. get rwlock by exclusive and then return 
     rw_lock_acquire(&b->rw_lock, exclusive ? RW_WRITER : RW_READER);
     return b;
@@ -207,5 +212,41 @@ void cache_flush(void) {
             cond_broadcast(&b->waiters, &cache_lock); // wake up waiters of writer 
         }
     }
+    lock_release(&cache_lock);
+}
+
+
+void cache_reset_stats(void) {
+    lock_acquire(&cache_lock);
+
+    /* First, write back all dirty blocks to avoid data loss */
+    for (int i = 0; i < CACHE_SIZE; i++) {
+        if (cache[i].valid && cache[i].dirty) {
+            block_sector_t sec = cache[i].sector;
+            lock_release(&cache_lock);
+            block_write(fs_device, sec, cache[i].data);
+            lock_acquire(&cache_lock);
+        }
+    }
+
+    /* Clear the state of all cache blocks */
+    for (int i = 0; i < CACHE_SIZE; i++) {
+        cache[i].valid = false;
+        cache[i].dirty = false;
+        cache[i].sector = 0;
+        cache[i].accessed = false;
+    }
+
+    /* Reset counters (do this last to avoid polluting the counts above) */
+    cache_hits = 0;
+    cache_misses = 0;
+
+    lock_release(&cache_lock);
+}
+
+void cache_get_stats(int *hits, int *misses) {
+    lock_acquire(&cache_lock);
+    *hits = cache_hits;
+    *misses = cache_misses;
     lock_release(&cache_lock);
 }

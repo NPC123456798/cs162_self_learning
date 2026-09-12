@@ -34,5 +34,7 @@ struct cache_block* cache_get_block(block_sector_t sector, bool exclusive);
 void cache_release_block(struct cache_block* b, bool exclusive);
 void cache_mark_dirty(struct cache_block* b); 
 void cache_flush(void);
+void cache_reset_stats(void);
+void cache_get_stats(int *hits, int *misses);
 
 #endif /* filesys/cache.h */

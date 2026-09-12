@@ -63,6 +63,11 @@ bool readdir(int fd, char name[READDIR_MAX_LEN + 1]);
 bool isdir(int fd);
 int inumber(int fd);
 
+// syscall.h
+void cache_reset(void);
+void cache_stats(int *hits, int *misses);
+int get_write_cnt(void);
+
 pid_t fork(void);
 
 #endif /* lib/user/syscall.h */

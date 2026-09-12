@@ -68,4 +68,8 @@ struct block_operations {
 struct block* block_register(const char* name, enum block_type, const char* extra_info,
                              block_sector_t size, const struct block_operations*, void* aux);
 
+
+
+int block_get_write_cnt(struct block *block);
+
 #endif /* devices/block.h */
