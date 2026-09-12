@@ -9,6 +9,7 @@
 static struct file* free_map_file; /* Free map file. */
 static struct bitmap* free_map;    /* Free map, one bit per sector. */
 static struct lock free_map_lock;
+static bool free_map_initializing = false;
 
 /* Initializes the free map. */
 void free_map_init(void) {
@@ -35,7 +36,7 @@ bool free_map_allocate(size_t cnt, block_sector_t* sectorp) {
   /* here write back into disk doesn't need global lock protect because cache buffer
   has its fine-grained lock to protect same sector one time only one thread write it and 
   different sector multiple threads write at same time doesn't be a problem */
-  if (sector != BITMAP_ERROR && free_map_file != NULL && !bitmap_write(free_map, free_map_file)) {
+  if (sector != BITMAP_ERROR && free_map_file != NULL &&  !free_map_initializing && !bitmap_write(free_map, free_map_file)) {
     bitmap_set_multiple(free_map, sector, cnt, false);
     sector = BITMAP_ERROR;
   }
@@ -70,6 +71,8 @@ void free_map_close(void) { file_close(free_map_file); }
 /* Creates a new free map file on disk and writes the free map to
    it. */
 void free_map_create(void) {
+      free_map_initializing = true;   // only set true on initialization duration
+
   /* Create inode. */
   if (!inode_create(FREE_MAP_SECTOR, bitmap_file_size(free_map), false))
     PANIC("free map creation failed");
@@ -80,4 +83,5 @@ void free_map_create(void) {
     PANIC("can't open free map");
   if (!bitmap_write(free_map, free_map_file))
     PANIC("can't write free map");
+        free_map_initializing = false;  // create end, close it immediately 
 }

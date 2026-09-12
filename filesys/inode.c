@@ -55,6 +55,7 @@ struct inode {
   bool is_dir;
   off_t length;
   struct inode_block_pointers block_ptrs;    /* cached  block pointers  */
+  bool block_ptrs_dirty;
   struct rw_lock inode_lock;                     /* protect length and block pointer */
   bool loading;
   struct condition waiters;
@@ -419,24 +420,10 @@ bool inode_create(block_sector_t sector, off_t length, bool is_dir) {
     disk_inode->inode_pointers.indirect = INVALID_SECTOR;
     disk_inode->inode_pointers.double_indirect = INVALID_SECTOR;
 
+
     /* compute numbers of data blocks need to be allcoated */
     size_t num_blocks = bytes_to_sectors(length);
 
-    /* allocate logic block one by one  */
-    bool ok = true;
-    for (size_t block_idx = 0; block_idx < num_blocks; block_idx++) {
-        if (!inode_allocate_block(&disk_inode->inode_pointers, block_idx)) {
-            ok = false;
-            break;
-        }
-    }
-
-    if (!ok) {
-        /* allocate fail, free allocated blocks  */
-        inode_free_blocks(&disk_inode->inode_pointers);
-        free(disk_inode);
-        return false;
-    }
 
     /* write inode meta data into cache   */
     struct cache_block *b = cache_get_block(sector, RW_WRITER);
@@ -444,16 +431,6 @@ bool inode_create(block_sector_t sector, off_t length, bool is_dir) {
     cache_mark_dirty(b);
     cache_release_block(b, RW_WRITER);
 
-    /* set all data blocks as zeros, it means now the file system is non-sparse */
-    for (size_t block_idx = 0; block_idx < num_blocks; block_idx++) {
-        block_sector_t data_sector = inode_get_data_sector(&disk_inode->inode_pointers, block_idx);
-        ASSERT(data_sector != INVALID_SECTOR);
-
-        struct cache_block *data_block = cache_get_block(data_sector, RW_WRITER);
-        memset(data_block->data, 0, BLOCK_SECTOR_SIZE);
-        cache_mark_dirty(data_block);
-        cache_release_block(data_block, RW_WRITER);
-    }
 
     free(disk_inode);
     return true;
@@ -499,6 +476,7 @@ struct inode* inode_open(block_sector_t sector) {
   inode->deny_write_cnt = 0;
   inode->removed = false;
   inode->loading = true;
+  inode->block_ptrs_dirty = false;
 
   list_push_front(&open_inodes, &inode->elem);
   lock_release(&inode_list_lock);
@@ -512,6 +490,7 @@ struct inode* inode_open(block_sector_t sector) {
   inode->length = disk_inode->length;
   inode->is_dir = disk_inode->is_dir;
   inode->block_ptrs = disk_inode->inode_pointers;
+
   cache_release_block(b, RW_READER);
 
   /* regain lock and mark load finished also waking up waiters  */
@@ -631,19 +610,6 @@ static bool inode_extend(struct inode *inode, off_t new_length) {
     off_t old_blocks = bytes_to_sectors(inode->length);
     off_t new_blocks = bytes_to_sectors(new_length);
 
-    off_t allocated = old_blocks;  // successfully allocated blocks' number  
-
-    for (off_t i = old_blocks; i < new_blocks; i++) {
-        if (!inode_allocate_block(&inode->block_ptrs, i)) {
-            // free allocated blocks in this loop 
-            for (off_t j = old_blocks; j < allocated; j++) {
-                inode_release_block_at(&inode->block_ptrs, j);
-            }
-            return false;
-        }
-        allocated++;
-    }
-
     inode->length = new_length;
 
     // write back inode into disk
@@ -679,9 +645,12 @@ off_t inode_write_at(struct inode* inode, const void* buffer_, off_t size, off_t
     }
   }
 
+  bool block_ptrs_dirty = false;
+
   while (size > 0) {
     /* Sector to write, starting byte offset within sector. */
-    block_sector_t sector_idx = inode_get_data_sector(&inode->block_ptrs, byte_to_sector(inode, offset));
+    off_t block_idx = byte_to_sector(inode, offset);
+    block_sector_t sector_idx = inode_get_data_sector(&inode->block_ptrs,block_idx );
     int sector_ofs = offset % BLOCK_SECTOR_SIZE;
 
     /* Bytes left in inode, bytes left in sector, lesser of the two. */
@@ -697,7 +666,19 @@ off_t inode_write_at(struct inode* inode, const void* buffer_, off_t size, off_t
 
     if (sector_idx == INVALID_SECTOR)
     {
-        break;
+        
+        /* allocate as need: the key of sparsity file system  
+        !now the implementation is not good for free map file if go into here and not in initialization duration */
+            if (!inode_allocate_block(&inode->block_ptrs, block_idx))
+                break;   /* memory not enough, return written bytes */
+            sector_idx = inode_get_data_sector(&inode->block_ptrs, block_idx);
+            block_ptrs_dirty = true;
+
+            /* new block cleared to zeros (this is important for directory entry judge and others rely on set zeros operation) */
+            struct cache_block *b = cache_get_block(sector_idx, RW_WRITER);
+            memset(b->data, 0, BLOCK_SECTOR_SIZE);
+            cache_mark_dirty(b);
+            cache_release_block(b, RW_WRITER);
     }
     
 
@@ -714,6 +695,16 @@ off_t inode_write_at(struct inode* inode, const void* buffer_, off_t size, off_t
     offset += chunk_size;
     bytes_written += chunk_size;
   }
+
+    /* if has allocated new block, should write updated block_ptrs back to inode disk  inode */
+    if (block_ptrs_dirty) {
+        struct cache_block *b = cache_get_block(inode->sector, RW_WRITER);
+        struct inode_disk *disk_inode = (struct inode_disk *)b->data;
+        disk_inode->inode_pointers = inode->block_ptrs;
+        disk_inode->length = inode->length;
+        cache_mark_dirty(b);
+        cache_release_block(b, RW_WRITER);
+    }
 
 
   rw_lock_release(&inode->inode_lock, RW_WRITER);
